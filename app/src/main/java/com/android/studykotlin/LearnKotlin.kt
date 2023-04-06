@@ -1,6 +1,5 @@
 package com.android.studykotlin
 
-import android.util.Log
 import kotlin.math.max
 
 /**
@@ -28,11 +27,6 @@ fun getScore(name: String) = when (name) {
     "Lily" -> 100
     else -> 0
 }
-
-
-
-
-
 
 
 

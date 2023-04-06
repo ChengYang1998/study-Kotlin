@@ -574,3 +574,502 @@ Thread(Runnable {
 }).start()
 ```
 
+举个例子，Android中有一个极为常用的点击事件接口OnClickListener，其定义如下：
+
+```java
+public interface OnClickListener {
+	void onClick(View v);
+}
+```
+
+这又是一个单抽象方法接口。假设现在我们拥有一个按钮button的实例，然后使用Java代码去注册这个按钮的点击事件，需要这么写：
+
+```java
+button.setOnClickListener(new View.OnClickListener() {
+    @Override
+    public void onClick(View v) {
+        //do something
+    }
+});
+```
+
+用Kotlin代码:
+
+```kotlin
+button.setOnClickListener {
+    //do something
+}
+```
+
+## 4.空指针检查
+
+>   在大型项目中，想要完全规避空指针异常几乎是不可能的事情，Kotlin科学地解决了这个问题
+
+```java
+public void doStudy(Study study) {
+	study.readBooks();
+	study.doHomework();
+}
+```
+
+这段Java代码安全吗？不一定，因为这要取决于调用方传入的参数是什么，如果我们向doStudy()方法传入了一个null参数，那么毫无疑问这里就会发生空指针异常。因此，更加稳妥的做法是在调用参数的方法之前先进行一个判空处理。
+
+```kotlin
+fun doStudy(study: Study) {
+	study.readBooks()
+	study.doHomework()
+}
+```
+
+看上去和刚才的Java版本并没有什么区别，但实际上它是**没有空指针风险**的，因为Kotlin**默认所有的参数和变量都不可为空**，所以这里传入的Study参数也一定不会为空，我们可以放心地调用它的任何函数。如果你尝试向doStudy()函数传入一个null参数，则会提示如图错误：
+
+![image-20230406104529406](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230406104529406.png)
+
+​	也就是说，Kotlin将空指针异常的检查提前到了编译时期，如果我们的程序存在空指针异常的风险，那么在编译的时候会直接报错，修正之后才能成功运行，这样就可以保证程序在运行时期不会出现空指针异常了。
+
+​	Kotlin提供了另外一套可为空的类型系统，只不过在使用可为空的类型系统时，我们需要在编译时期就将所有潜在的空指针异常都处理掉，否则代码将无法编译通过。
+
+​	可为空的类型系统就是在类名的后面加上一个问号。比如，Int表示不可为空的整型，而Int?就表示可为空的整型；String表示不可为空的字符串，而String?就表示可为空的字符串。
+​	回到刚才的doStudy()函数，如果希望传入的参数可以为空，那么就应该将参数的类型由Study改成Study?，如图所示：
+
+![image-20230406105105937](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230406105105937.png)
+
+​	然而，在doStudy()函数中调用参数的readBooks()和doHomework()方法时，却出现了一个红色下滑线的错误提示。由于我们将参数改成了可为空的Study?类型，此时调用参数的readBooks()和doHomework()方法都可能造成空指针异常，因此Kotlin在这种情况下不允许编译通过。
+
+​	只要把空指针异常都处理掉就可以了，比如做个判断处理。
+
+```kotlin
+fun doStudy(study: Study?) {
+    if (study != null) {
+        study.readBooks()
+        study.doHomework()
+    }
+}
+```
+
+现在代码就可以正常编译通过了，并且还能保证完全不会出现空指针异常。
+
+### 判空辅助工具
+
+#### 1.最常用的操作符 ?. 
+
+```kotlin
+if (a != null) {
+	a.doSomething()
+}
+```
+
+简化成：
+
+```kotlin
+a?.doSomething()
+```
+
+#### 2.非常常用的 ?: 操作符
+
+这个操作符的左右两边都接收一个表达式，如果左边表达式的结果不为空就返回左边表达式的结果，否则就返回右边表达式的结果。
+
+```kotlin
+val c = if (a ! = null) {
+	a
+} else {
+	b
+}
+```
+
+使用 ?: 操作符就可以简化成：
+
+```kotlin
+val c = a ?: b
+```
+
+
+
+演示：
+
+```kotlin
+fun getTextLength(text: String?): Int {
+	if (text != null) {
+		return text.length
+	}
+	return 0
+}
+```
+
+可以借助操作符让它变得简单，如下所示：
+
+```kotlin
+fun getTextLength(text: String?) = text?.length ?: 0
+```
+
+#### 3.非空断言工具 !!
+
+```kotlin
+var content: String? = "hello"
+fun main() {
+    if (content != null) {
+        printUpperCase()
+    }
+}
+
+fun printUpperCase() {
+    val upperCase = content.toUpperCase()
+    println(upperCase)
+}
+```
+
+​	这里定义了一个可为空的全局变量content，然后在main()函数里先进行一次判空操作，当content不为空的时候才会调用printUpperCase()函数，printUpperCase()函数里，将content转换为大写模式，最后打印出来。
+
+​	看上去好像逻辑没什么问题，但是这段代码一定是无法运行的。因为printUpperCase()函数并不知道外部已经对content变量进行了非空检查，在调用
+toUpperCase()方法时，还认为这里存在空指针风险，从而无法编译通过。
+
+​	在这种情况下，如果我们想要强行通过编译，可以使用非空断言工具，写法是在对象的后面加上!!，如下所示：
+
+```kotlin
+fun printUpperCase() {
+    val upperCase = content!!.toUpperCase()
+    println(upperCase)
+}
+```
+
+这是一种有风险的写法，意在告诉Kotlin，我非常确信这里的对象不会为空，所以不用你来帮我做空指针检查了，如果出现问题，你可以直接抛出空指针异常，后果由我自己承担。
+
+#### 4.let函数
+
+>   这个函数提供了函数式API的编程接口，并将原始调用对象作为参数传递到Lambda表达式中
+
+```kotlin
+obj.let { obj2 ->
+// 编写具体的业务逻辑
+}
+```
+
+这里调用了obj对象的let函数，然后Lambda表达式中的代码就会立即执行，并且这个obj对象本身还会作为参数传递到Lambda表达式中。
+
+比如：
+
+```kotlin
+fun doStudy(study: Study?) {
+	study?.readBooks()
+	study?.doHomework()
+}
+```
+
+此时，每次调用study对象的方法时都要进行一次if判断。
+
+结合使用 ?.操作符 和 let函数 来对代码进行优化：
+
+```kotlin
+fun doStudy(study: Study?) {
+    study?.let { 
+        it.readBooks()
+        it.doHomework()
+    }?: run {
+    // 对空进行处理，或者直接返回
+	}
+}
+```
+
+>   在这个过程中，是将需要处理的对象作为`let`函数的参数传入,其他线程无法修改该对象，因为该对象在`let`函数的作用域内，只有该作用域内的代码才能访问和修改该对象。
+
+let函数是可以处理全局变量的判空问题的，而if判断语句则无法做到这一点。比如我们将doStudy()函数中的参数变成一个全局变量，使用let函数仍然可以正常工作，但使用if判断语句则会提示错误:
+
+![image-20230406111900482](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230406111900482.png)
+
+​	之所以这里会报错，是因为全局变量的值随时都有可能被其他线程所修改，即使做了判空处理，仍然无法保证if语句中的study变量没有空指针风险。
+
+## 5.小技巧
+
+### 1.字符串内嵌表达式
+
+Kotlin中字符串内嵌表达式的语法规则：
+
+```kotlin
+"hello, ${obj.name}. Nice to meet you!"
+```
+
+可以看到，Kotlin允许我们在字符串里嵌入`${}`这种语法结构的表达式，并在运行时使用表达式执行的结果替代这一部分内容。
+
+另外，当表达式中仅有一个变量的时候，还可以将两边的大括号省略，如下所示：
+
+```kotlin
+"hello, $name. Nice to meet you!" 
+```
+
+拼接字符串的写法:
+
+```kotlin
+val brand = "Samsung" 
+val price = 1299.99 
+println("Cellphone(brand=" + brand + ", price=" + price + ")") 
+```
+
+而使用字符串内嵌表达式的写法就变得非常简单了，如下所示：
+
+```kotlin
+val brand = "Samsung" 
+val price = 1299.99 
+println("Cellphone(brand=$brand, price=$price)") 
+```
+
+### 2.函数的参数默认值
+
+>   可以在定义函数的时候给任意参数设定一个默认值，这样当调用此函数时就不会强制要求调用方为此参数传值，在没有传值的情况下会自动使用参数的默认值。
+
+给参数设定默认值的方式:
+
+```kotlin
+fun printParams(num: Int, str: String = "hello") {
+	println("num is $num , str is $str")
+}
+```
+
+可以看到，这里我们给printParams()函数的第二个参数设定了一个默认值，这样当调用printParams()函数时，可以选择给第二个参数传值，也可以选择不传，**在不传的情况下就会自动使用默认值**。
+
+​	如果想让第一个参数使用默认值该怎么办呢？模仿刚才的写法肯定是行不通的，因为编译器会认为我们想把字符串赋值给第一个num参数，从而报类型不匹配的错误，如图所示:
+
+<img src="https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230406114001661.png" alt="image-20230406114001661" style="zoom:80%;" />
+
+Kotlin提供了另外一种神奇的机制，就是可以通过键值对的方式来传参，从而不必像传统写法那样按照参数定义的顺序来传参。比如调用printParams()函数，我们还可以这样写：
+
+```kotlin
+printParams(str = "world", num = 123)
+```
+
+>   此时哪个参数在前哪个参数在后都无所谓，Kotlin可以准确地将参数匹配上
+
+而使用这种键值对的传参方式之后，我们就可以省略num参数了，代码如下：
+
+```kotlin
+fun printParams(num: Int = 100, str: String) {
+	println("num is $num , str is $str")
+}
+fun main() {
+	printParams(str = "world")
+}
+```
+
+
+
+这个功能可以在很大程度上替代次构造函数的作用:
+
+```kotlin
+class Student(val sno: String, val grade: Int, name: String, age: Int) :
+    Person(name, age) {
+    constructor(name: String, age: Int) : this("", 0, name, age) {
+    }
+    constructor() : this("", 0) {
+    }
+}
+```
+
+这个类名为`Student`，它继承自`Person`类，有四个主要的属性：`sno`、`grade`、`name`和`age`，其中`sno`和`grade`是用`val`修饰的不可变属性，`name`和`age`是可变属性。
+
+该类有三个构造函数，其中一个是主构造函数，另外两个是次要构造函数。
+
+主构造函数有四个参数：`sno`、`grade`、`name`和`age`，其中`sno`和`grade`是用`val`修饰的不可变属性，`name`和`age`是普通参数。主构造函数的实现中调用了`Person`类的构造函数来初始化`name`和`age`属性。
+
+第一个次要构造函数有两个参数：`name`和`age`，它调用了主构造函数，传入了空字符串和0作为`sno`和`grade`的默认值。
+
+第二个次要构造函数没有参数，它也调用了主构造函数，传入了空字符串和0作为`sno`和`grade`的默认值。
+
+这种写法在Kotlin中其实是不必要的，因为我们完全可以通过只编写一个主构造函数，然后给参数设定默认值的方式来实现，代码如下所示：
+
+```kotlin
+class Student(val sno: String = "", val grade: Int = 0, name: String = "", age: Int = 0) :
+    Person(name, age)
+```
+
+在给主构造函数的每个参数都设定了默认值之后，我们就可以使用任何传参组合的方式来对Student类进行实例化，当然也包含了刚才两种次构造函数的使用场景。
+
+
+
+## 6.标准函数和静态方法
+
+>   Kotlin的标准函数指的是Standard.kt文件中定义的函数，任何Kotlin代码都可以自由地调用所有的标准函数。
+
+### 1.with函数
+
+with函数接收两个参数：第一个参数可以是一个任意类型的对象，第二个参数是一个Lambda表达式。with函数会在Lambda表达式中提供第一个参数对象的上下文，并使用Lambda表达式中的最后一行代码作为返回值返回。示例代码如下：
+
+```kotlin
+val result = with(obj) {
+// 这里是obj的上下文
+    "value" // with函数的返回值
+}
+```
+
+它可以在连续调用同一个对象的多个方法时让代码变得更加精简。
+
+比如有一个水果列表，现在我们想吃完所有水果，并将结果打印出来，就可以这样写：
+
+```kotlin
+val list = listOf("Apple", "Banana", "Orange", "Pear", "Grape")
+val builder = StringBuilder()
+builder.append("Start eating fruits.\n")
+for (fruit in list) {
+    builder.append(fruit).append("\n")
+}
+builder.append("Ate all fruits.")
+val result = builder.toString()
+println(result)
+```
+
+这段代码的逻辑很简单，就是使用StringBuilder来构建吃水果的字符串，最后将结果打印出来。如果运行一下上述代码，那么一定会得到如图所示的打印结果。
+
+![image-20230406133410614](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230406133410614.png)
+
+仔细观察上述代码，会发现连续调用了多次builder对象的方法。其实这个时候就可以考虑使用with函数来让代码变得更加精简，如下所示：
+
+```kotlin
+val list = listOf("Apple", "Banana", "Orange", "Pear", "Grape")
+val result = with(StringBuilder()) {
+    append("Start eating fruits.\n")
+    for (fruit in list) {
+        append(fruit).append("\n")
+    }
+    append("Ate all fruits.")
+    toString()
+}
+println(result)
+```
+
+### 2.run函数
+
+-   run函数通常不会直接调用，而是要在某个对象的基础上调用。
+-   run函数只接收一个Lambda参数，并且会在Lambda表达式中提供调用对象的上下文。
+
+```kotlin
+val result = obj.run {
+	// 这里是obj的上下文
+	"value" // run函数的返回值
+}
+```
+
+使用run函数来修改一下吃水果的这段代码，如下所示：
+
+```kotlin
+val list = listOf("Apple", "Banana", "Orange", "Pear", "Grape")
+val result = StringBuilder().run {
+    append("Start eating fruits.\n")
+    for (fruit in list) {
+        append(fruit).append("\n")
+    }
+    append("Ate all fruits.")
+    toString()
+}
+println(result)
+```
+
+总体来说变化非常小，只是将调用with函数并传入StringBuilder对象改成了调用
+StringBuilder对象的run方法，其他都没有任何区别。
+
+### 3.apply函数
+
+。apply函数和run函数也是极其类似的，都要在某个对象上调用，并且只接收一个Lambda参数，也会在Lambda表达式中提供调用对象的上下文，但是apply函数无法指定返回值，而是会自动返回调用对象本身。示例代码如下：
+
+```kotlin
+val result = obj.apply {
+	// 这里是obj的上下文
+}
+// result == obj
+```
+
+再使用apply函数来修改一下吃水果的这段代码，如下所示：
+
+```kotlin
+val list = listOf("Apple", "Banana", "Orange", "Pear", "Grape")
+val result = StringBuilder().apply {
+    append("Start eating fruits.\n")
+    for (fruit in list) {
+        append(fruit).append("\n")
+    }
+    append("Ate all fruits.")
+}
+println(result.toString())
+```
+
+注意这里的代码变化，由于apply函数无法指定返回值，只能返回调用对象本身，因此这里的result实际上是一个StringBuilder对象，所以我们在最后打印的时候还要再调用它的toString()方法才行。
+
+
+
+### 函数总结：
+
+| 函数  | 类型     | Lambda 接收者 | 引用对象方式 | 返回值                  |
+| ----- | -------- | ------------- | ------------ | ----------------------- |
+| let   | 扩展函数 | 调用对象      | 使用 `it`    | Lambda 表达式的结果     |
+| with  | 普通函数 | 传入对象      | 直接访问     | Lambda 表达式的结果     |
+| run   | 扩展函数 | 调用对象      | 直接访问     | Lambda 表达式的结果     |
+| apply | 扩展函数 | 调用对象      | 直接访问     | 调用 `apply` 的对象本身 |
+
+### 定义静态方法
+
+>   静态方法在某些编程语言里面又叫作类方法，指的就是那种不需要创建实例就能调用的方法，所有主流的编程语言都会支持静态方法这个特性。
+
+在Java中定义一个静态方法非常简单，只需要在方法上声明一个static关键字就可以了。
+
+```java
+public class Util {
+    public static void doAction() {
+        System.out.println("do action");
+    }
+}
+```
+
+这是一个非常简单的工具类,上述代码中的doAction()方法就是一个静态方法。调用静态方法并不需要创建类的实例，而是可以直接以Util.doAction()这种写法来调用。因而静态方法非常适合用于编写一些工具类的功能，因为工具类通常没有创建实例的必要，基本是全局通用的。
+
+但是和绝大多数主流编程语言不同的是，Kotlin却极度弱化了静态方法这个概念，想要在Kotlin中定义一个静态方法反倒不是一件容易的事。
+
+像工具类这种功能，在Kotlin中就非常推荐使用单例类的方式来实现，比如上述的Util工具类，如果使用Kotlin来实现的话就可以这样写：
+
+```kotlin
+object Util {
+    fun doAction() {
+        println("do action")
+    }
+}
+```
+
+虽然这里的doAction()方法并不是静态方法，但是我们可以使用Util.doAction()的方式来调用，这就是单例类所带来的便利性。
+
+不过，使用单例类的写法会将整个类中的所有方法全部变成类似于静态方法的调用方式，而如果只是希望让类中的某一个方法变成静态方法的调用方式就可以使用companion object，示例如下：
+
+```kotlin
+class Util {
+    fun doAction1() {
+        println("do action1")
+    }
+    companion object {
+        fun doAction2() {
+            println("do action2")
+        }
+    }
+}
+```
+
+类中直接定义了一个doAction1()方法，又在companion object中定义了一个doAction2()方法。现在这两个方法就有了本质的区别，因为doAction1()方法是一定要**先创建Util类的实例**才能调用的，而doAction2()方法可以**直接使用Util.doAction2()**的方式调用。
+
+不过，doAction2()方法其实也并不是静态方法，companion object这个关键字实际上会在Util类的内部创建一个伴生类，而doAction2()方法就是定义在这个伴生类里面的实例方法。只是Kotlin会保证Util类始终只会存在一个伴生类对象，因此调用Util.doAction2()方法实际上就是调用了Util类中伴生对象的doAction2()方法。
+
+由此可以看出，Kotlin确实没有直接定义静态方法的关键字，但是提供了一些语法特性来支持类似于静态方法调用的写法，这些语法特性基本可以满足我们平时的开发需求了。
+
+而真正的静态方法， Kotlin仍然提供了两种实现方式：
+
+-   方法加上@JvmStatic注解（@JvmStatic注解只能加在单例类或companion object中的方法上，如果你尝试加在一个普通方法上，会直接提示语法错误。）
+
+-   **顶层方法**
+
+    顶层方法指的是那些没有定义在任何类中的方法，比如我们在上一节中编写的main()方法。Kotlin编译器会将所有的顶层方法全部编译成静态方法，因此只要你定义了一个顶层方法，那么它就一定是静态方法。
+
+    创建一个Kotlin文件，在这个文件中定义的任何方法都会是顶层方法。
+
+    调用这个方法：不用管包名路径，也不用创建实例，直接键入method()即可。
+
+    在Java代码中调用：Kotlin文件.method()
+
+
+
+
+
+
+
