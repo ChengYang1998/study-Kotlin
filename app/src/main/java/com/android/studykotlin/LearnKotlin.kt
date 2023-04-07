@@ -38,5 +38,3 @@ fun getScore(name: String) = when (name) {
 
 
 
-
-

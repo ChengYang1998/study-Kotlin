@@ -1067,6 +1067,470 @@ class Util {
 
     在Java代码中调用：Kotlin文件.method()
 
+## 7.对变量延迟初始化
+
+MainActivity中适配器的代码：
+
+```kotlin
+class MainActivity : AppCompatActivity(), View.OnClickListener {
+    private var adapter: MsgAdapter? = null
+    override fun onCreate(savedInstanceState: Bundle?) {
+        ...
+        adapter = MsgAdapter(msgList)
+        ...
+    }
+    override fun onClick(v: View?) {
+        ...
+        adapter?.notifyItemInserted(msgList.size - 1)
+        ...
+    }
+}
+```
+
+这里将adapter设置为了全局变量，但是它的初始化工作是在onCreate()方法中进行的，因此不得不先将adapter赋值为null，同时把它的类型声明成MsgAdapter?。
+
+​	虽然我们会在onCreate()方法中对adapter进行初始化，同时能确保onClick()方法必然在onCreate()方法之后才会调用，但是在onClick()方法中调用adapter的任何方法时仍然要进行判空处理才行，否则编译肯定无法通过。
+
+​	当代码中有了越来越多的全局变量实例时，这个问题就会变得越来越明显。
+
+​	这个问题其实是有解决办法的，就是对全局变量进行**延迟初始化**。
+
+​	延迟初始化使用的是`lateinit`关键字，它可以告诉Kotlin编译器，我会在晚些时候对这个变量进行初始化，这样就不用在一开始的时候将它赋值为null了。
+
+使用延迟初始化的方式对上述代码进行优化，如下所示：
+
+```kotlin
+class MainActivity : AppCompatActivity(), View.OnClickListener {
+    private lateinit var adapter: MsgAdapter
+    override fun onCreate(savedInstanceState: Bundle?) {
+        ...
+        adapter = MsgAdapter(msgList)
+        ...
+    }
+    override fun onClick(v: View?) {
+        ...
+        adapter.notifyItemInserted(msgList.size - 1)
+        ...
+    }
+}
+```
+
+另外，还可以通过代码来判断一个全局变量是否已经完成了初始化，这样在某些时候能够有效地避免重复对某一个变量进行初始化操作，示例代码如下：
+
+```kotlin
+class MainActivity : AppCompatActivity(), View.OnClickListener {
+    private lateinit var adapter: MsgAdapter
+    override fun onCreate(savedInstanceState: Bundle?) {
+        ...
+        if (!::adapter.isInitialized) {
+            adapter = MsgAdapter(msgList)
+        }
+        ...
+    }
+}
+```
+
+`::adapter.isInitialized`可用于判断adapter变量是否已经初始化。
+
+## 8.使用密封类优化代码
+
+>   密封类通常可以结合RecyclerView适配器中的ViewHolder一起使用，很多时候
+>   帮助写出更加规范和安全的代码
+
+密封类具体的作用，一个简单的例子。新建一个Kotlin文件，文件名叫Result.kt，然后在这个文件中编写如下代码：
+
+```kotlin
+interface Result
+class Success(val msg: String) : Result
+class Failure(val error: Exception) : Result
+```
+
+定义了一个Result接口，用于表示某个操作的执行结果，接口中不用编写任何内容。然后定义了两个类去实现Result接口：一个Success类用于表示成功时的结果，一个Failure类用于表示失败时的结果，这样就把准备工作做好了。
+
+接下来再定义一个getResultMsg()方法，用于获取最终执行结果的信息，代码如下所示：
+
+```kotlin
+fun getResultMsg(result: Result) = when (result) {
+    is Success -> result.msg
+    is Failure -> result.error.message
+    else -> throw IllegalArgumentException()
+}
+```
+
+getResultMsg()方法中接收一个Result参数。我们通过when语句来判断：
+
+如果Result属于Success，那么就返回成功的消息；
+
+如果Result属于Failure，那么就返回错误信息。
+
+​	但讨厌的是，接下来不得不再编写一个else条件，否则Kotlin编译器会认为这里缺少条件分支，代码将无法编译通过。但实际上Result的执行结果只可能是Success或者Failure，这个else条件是永远走不到的，所以我们在这里直接抛出了一个异常，只是为了满足Kotlin编译器的语法检查而已。
+
+​	另外，编写else条件还有一个潜在的风险。如果我们现在新增了一个Unknown类并实现Result接口，用于表示未知的执行结果，但是忘记在getResultMsg()方法中添加相应的条件分支，编译器在这种情况下是不会提醒我们的，而是会在运行的时候进入else条件里面，从而抛出异常并导致程序崩溃。
+
+>   Kotlin的密封类可以很好地解决这个问题
+
+密封类的关键字是sealed class
+
+我们将Result接口改造成密封类的写法：
+
+```kotlin
+sealed class Result
+class Success(val msg: String) : Result()
+class Failure(val error: Exception) : Result()
+```
+
+>   由于密封类是一个可继承的类，因此在继承它的时候需要在后面加上一对括号
+
+此时在getResultMsg()方法中的else条件已经不再需要了，如下所示：
+
+```kotlin
+fun getResultMsg(result: Result) = when (result) {
+    is Success -> result.msg
+    is Failure -> "Error is ${result.error.message}"
+}
+```
+
+因为当在when语句中传入一个密封类变量作为条件时，Kotlin编译器会自动检查该密封类有哪些子类，并**强制要求你将每一个子类所对应的条件全部处理**。这样就可以保证，即使没有编写else条件，也不可能会出现漏写条件分支的情况。而如果我们现在新增一个Unknown类，并也让它继承自Result，此时getResultMsg()方法就一定会报错，必须增加一个Unknown的条件分支才能让代码编译通过。
+
+>密封类及其所有子类只能定义在同一个文件的顶层位置，不能嵌套在其他类中，这是被密封类底层的实现机制所限制的。
+
+
+
+如何结合MsgAdapter中的ViewHolder一起使用，并顺便优化一下MsgAdapter中的代码:
+
+## 9.扩展函数
+
+>   扩展函数表示即使在不修改某个类的源码的情况下，仍然可以打开这个类，向该类添加新的函数。
+
+语法结构:
+
+```kotlin
+fun ClassName.methodName(param1: Int, param2: Int): Int {
+    return 0
+}
+```
+
+定义扩展函数只需要在函数名的前面加上一个ClassName.的语法结构，就表示将该函数添加到指定类当中了。
+
+一段字符串中可能包含字母、数字和特殊符号等字符，现在我们希望统计字符串中字母的数量:
+
+```kotlin
+object StringUtil {
+    fun lettersCount(str: String): Int {
+        var count = 0
+        for (char in str) {
+            if (char.isLetter()) {
+                count++
+            }
+        }
+        return count
+    }
+}
+```
+
+尝试使用扩展函数的方式来优化:
+
+由于我们希望向String类中添加一个扩展函数，因此需要先创建一个String.kt文件。
+
+文件名虽然并没有固定的要求，但是建议向哪个类中添加扩展函数，就定义一个同名的Kotlin文件，这样便于以后查找。当然，扩展函数也是可以定义在任何一个现有类当中的，并不一定非要创建新文件。不过通常来说，最好将它定义成顶层方法，这样可以让扩展函数拥有全局的访问域。
+现在在String.kt文件中编写如下代码：
+
+```kotlin
+fun String.lettersCount(): Int {
+    var count = 0
+    for (char in this) {
+        if (char.isLetter()) {
+            count++
+        }
+    }
+    return count
+}
+```
+
+现在lettersCount()方法定义成了String类的扩展函数，那么函数中就自动拥有了String实例的上下文。
+
+因此lettersCount()函数就不再需要接收一个字符串参数了，而是直接遍历this即可，因为现在this就代表着字符串本身。
+定义好了扩展函数之后，统计某个字符串中的字母数量只需要这样写即可：
+
+```kotlin
+val count = "ABC123xyz!@#".lettersCount() 
+```
+
+看上去就好像是String类中自带了lettersCount()方法一样。
+
+
+
+## 10.运算符重载
+
+| 语法糖表达式 | 实际调用函数        |
+| ------------ | ------------------- |
+| a + b        | a.plus(b)           |
+| a - b        | a.minus(b)          |
+| a * b        | a.times(b)          |
+| a / b        | a.div(b)            |
+| a % b        | a.rem(b)            |
+| a++          | a.inc()             |
+| a--          | a.dec()             |
+| +a           | a.unaryPlus()       |
+| -a           | a.unaryMinus()      |
+| !a           | a.not()             |
+| a == b       | a.equals(b)         |
+| a > b        | a.compareTo(b) > 0  |
+| a < b        | a.compareTo(b) < 0  |
+| a >= b       | a.compareTo(b) >= 0 |
+| a <= b       | a.compareTo(b) <= 0 |
+| a..b         | a.rangeTo(b)        |
+| a[b]         | a.get(b)            |
+| a[b] = c     | a.set(b, c)         |
+| a in b       | b.contains(a)       |
+
+>   Kotlin语法糖。Java中有许多语言内置的运算符关键字，如+ - * / % ++ --。而Kotlin允许我们将所有的运算符甚至其他的关键字进行重载，从而拓展这些运算符和关键字的用法。
+
+运算符重载:使用的是 `operator` 关键字。
+
+在指定函数的前面加上operator关键字，就可以实现运算符重载的功能了。
+
+但问题在于这个指定函数是什么？这是运算符重载里面比较复杂的一个问题，因为不同的运算符对应的重载函数也是不同的。比如说加号运算符对应的是plus()函数，减号运算符对应的是minus()函数。
+
+以加号运算符为例，如果想要实现让两个对象相加的功能，那么它的语法结构如下：
+
+```kotlin
+class Obj {
+    operator fun plus(obj: Obj): Obj {
+// 处理相加的逻辑
+    }
+}
+```
+
+在上述语法结构中，关键字operator和函数名plus都是固定不变的，而接收的参数和函数返回值可以根据你的逻辑自行设定。那么上述代码就表示一个Obj对象可以与另一个Obj对象相加，最终返回一个新的Obj对象。对应的调用方式如下：
+
+```kotlin
+val obj1 = Obj()
+val obj2 = Obj()
+val obj3 = obj1 + obj2
+```
+
+这种`obj1 + obj2`的语法看上去好像很神奇，但其实这就是Kotlin给我们提供的一种语法糖，它会在编译的时候被转换成`obj1.plus(obj2)`的调用方式。
+
+演示：
+
+定义Money类的结构，这里我准备让Money的主构造函数接收一个value参数，用于表示钱的金额。创建Money.kt文件，代码如下所示：
+
+```kotlin
+class Money(val value: Int)
+```
+
+使用运算符重载来实现让两个Money对象相加的功能：
+
+```kotlin
+class Money(val value: Int) {
+    operator fun plus(money: Money): Money {
+        val sum = value + money.value
+        return Money(sum)
+    }
+}
+```
+
+测试：
+
+```kotlin
+val money1 = Money(5)
+val money2 = Money(10)
+val money3 = money1 + money2
+println(money3.value)	//15
+```
+
+对同一个运算符进行多重重载,Money对象能够直接和数字相加：
+
+```kotlin
+class Money(val value: Int) {
+    operator fun plus(money: Money): Money {
+        val sum = value + money.value
+        return Money(sum)
+    }
+    operator fun plus(newValue: Int): Money {
+        val sum = value + newValue
+        return Money(sum)
+    }
+}
+```
+
+那么现在，Money对象就拥有了和数字相加的能力：
+
+
+
+## 11.高阶函数
+
+### 1.定义高阶函数
+
+>如果一个函数接收另一个函数作为参数，或者返回值的类型是另一个函数，那么该函数就称为高阶函数。
+
+函数类型。我们知道，编程语言中有整型、布尔型等字段类型，而Kotlin又增加了一个函数类型的概念。
+
+如果我们将这种函数类型添加到一个函数的参数声明或者返回值声明当中，那么这就是一个高阶函数了。
+
+接下来我们就学习一下如何定义一个函数类型。不同于定义一个普通的字段类型，函数类型的语法规则是有点特殊的，基本规则如下：
+
+```kotlin
+(String, Int) -> Unit
+```
+
+既然是定义一个函数类型，那么最关键的就是要声明该函数接收什么参数，以及它的返回值是什么。
+
+因此，->左边的部分就是用来声明该函数接收什么参数的，**多个参数之间使用逗号隔开，如果不接收任何参数，写一对空括号**就可以了。而->右边的部分用于声明该函数的返回值是什么类型，如果**没有返回值就使用Unit**，它大致相当于Java中的void。
+
+将上述函数类型添加到某个函数的参数声明或者返回值声明上，那么这个函数就是一个高阶函数了，如下所示：
+
+```kotlin
+fun example(func: (String, Int) -> Unit) {
+    func("hello", 123)
+}
+```
+
+这段代码定义了一个名为example的函数，它的参数是一个类型为 `(String, Int) -> Unit` 的函数变量 `func`，这个函数类型表示接受两个参数 `String` 和 `Int`，没有返回值。
+
+在函数体内，我们调用了 `func` 函数，并将参数设置为 `"hello"` 和 `123`，这样就可以将这两个参数传递给传递给 `func` 函数。
+
+这个函数可以用来演示 Kotlin 中的高阶函数，也就是函数可以作为参数传递的特性。
+
+高阶函数可以让我们更加灵活地处理函数，可以将函数作为参数传递给其他函数，也可以将函数作为返回值返回。这种方式可以帮助我们将代码模块化，使得代码更加易于维护和扩展。
+
+在实际应用中，高阶函数可以用来实现各种设计模式，如策略模式、观察者模式等，也可以用来处理集合数据、进行异步操作等。
+
+例如，在Android开发中，我们经常需要处理异步任务，可以通过高阶函数来将异步任务和UI线程分离开来，避免UI卡顿问题。另外，Android中的RecyclerView也使用了高阶函数来实现数据绑定和布局管理等功能。
+
+>简单概括一下的话，那就是高阶函数允许让函数类型的参数来决定函数的执行逻辑。即使是同一个高阶函数，只要传入不同的函数类型参数，那么它的执行逻辑和最终的返回结果就可能是完全不同的。
+
+#### 函数引用的写法
+
+定义一个叫作num1AndNum2()的高阶函数，并让它接收两个整型和一个函数类型的参数。我们会在num1AndNum2()函数中对传入的两个整型参数进行某种运算，并返回最终的运算结果，但是具体进行什么运算是由传入的函数类型参数决定的。
+新建一个HigherOrderFunction.kt文件，然后在这个文件中编写如下代码：
+
+```kotlin
+fun num1AndNum2(num1: Int, num2: Int, operation: (Int, Int) -> Int): Int {
+    val result = operation(num1, num2)
+    return result
+}
+```
+
+num1AndNum2()函数的前两个参数没有什么需要解释的，第三个参数是一个接收两个整型参数并且返回值也是整型的函数类型参数。在num1AndNum2()函数中，我们没有进行任何具体的运算操作，而是将num1和num2参数传给了第三个函数类型参数，并获取它的返回值，最终将得到的返回值返回。
+
+现在高阶函数已经定义好了，那么我们该如何调用它呢？由于num1AndNum2()函数接收一个函数类型的参数，因此我们还得先定义与其函数类型相匹配的函数才行。在HigherOrderFunction.kt文件中添加如下代码：
+
+```kotlin
+fun plus(num1: Int, num2: Int): Int {
+    return num1 + num2
+}
+fun minus(num1: Int, num2: Int): Int {
+    return num1 - num2
+}
+```
+
+这里定义了两个函数，并且这两个函数的参数声明和返回值声明都和num1AndNum2()函数中的函数类型参数是完全匹配的。其中，plus()函数将两个参数相加并返回，minus()函数将两个参数相减并返回，分别对应了两种不同的运算操作。
+
+有了上述函数之后，我们就可以调用num1AndNum2()函数了，在main()函数中编写如下代码：
+
+```kotlin
+fun main() {
+    val num1 = 100
+    val num2 = 80
+    val result1 = num1AndNum2(num1, num2, ::plus)
+    val result2 = num1AndNum2(num1, num2, ::minus)
+    println("result1 is $result1")
+    println("result2 is $result2")
+}
+```
+
+>注意这里调用num1AndNum2()函数的方式，第三个参数使用了::plus和::minus这种写法。
+>
+>这是一种函数引用方式的写法，表示将plus()和minus()函数作为参数传递给num1AndNum2()函数。
+>
+>而由于num1AndNum2()函数中使用了传入的函数类型参数来决定具体的运算逻辑，因此这里实际上就是分别使用了plus()和minus()函数来对两个数字进行运算。
+
+#### Lambda表达式调用高阶函数
+
+上述代码如果使用Lambda表达式的写法来实现的话，代码如下所示：
+
+```kotlin
+fun main() {
+    val num1 = 100
+    val num2 = 80
+    val result1 = num1AndNum2(num1, num2) { n1, n2 ->
+        n1 + n2
+    }
+    val result2 = num1AndNum2(num1, num2) { n1, n2 ->
+        n1 - n2
+    }
+    println("result1 is $result1")
+    println("result2 is $result2")
+}
+```
+
+apply函数可以为Lambda表达式提供一个指定的上下文，使得代码更加精简，比如StringBuilder。
+
+现在使用高阶函数来模仿实现类似的功能。
+
+```kotlin
+fun StringBuilder.build(block: StringBuilder.() -> Unit): StringBuilder {
+    block()
+    return this
+}
+```
+
+这是一个扩展函数，用于为StringBuilder类添加一个build方法，该方法接收一个Lambda表达式作为参数，Lambda表达式的类型为StringBuilder.() -> Unit。
+
+在Lambda表达式中，可以直接调用StringBuilder对象的方法，因为Lambda表达式中的this指向的是调用build方法的StringBuilder对象本身。
+
+在build方法中，首先调用Lambda表达式，即执行传入的代码块，然后返回this，也就是当前的StringBuilder对象。
+
+这个高阶函数的作用与apply函数类似，都可以为Lambda表达式提供一个指定的上下文，并且使用Lambda表达式来连续调用同一个对象的多个方法。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
