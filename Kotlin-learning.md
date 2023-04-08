@@ -2195,3 +2195,679 @@ to()函数的具体实现，非常简单，就是创建并返回了一个Pair对
 
 ## 16.泛型的高级特性
 
+Kotlin在泛型方面还提供了不少特有的功能。
+
+### 1.对泛型进行实化
+
+> 实际上，Java的泛型功能是通过类型擦除机制来实现的。什么意思呢？就是说泛型对于类型的约束只在编译时期存在，运行的时候仍然会按照JDK 1.5之前的机制来运行，JVM是识别不出来我们在代码中指定的泛型类型的。例如，假设我们创建了一个`List<String>`集合，虽然在编译时期只能向集合中添加字符串类型的元素，但是在运行时期JVM并不能知道它本来只打算包含哪种类型的元素，只能识别出来它是个List。
+
+Kotlin中是可以将内联函数中的泛型进行实化的。
+
+具体该怎么写才能将泛型实化呢？
+
+首先，该函数必须是内联函数才行，也就是要用inline关键字来修饰该函数。
+
+其次，在声明泛型的地方必须加上reified关键字来表示该泛型要进行实化。
+
+示例代码如下：
+
+```kotlin
+inline fun <reified T> getGenericType() {
+}
+```
+
+上述函数中的泛型T就是一个被实化的泛型，因为它满足了内联函数和reified关键字这两个前提条件。
+
+可实现什么样的效果：
+
+这里准备实现一个获取泛型实际类型的功能，代码如下所示：
+
+```kotlin
+inline fun <reified T> getGenericType() = T::class.java
+```
+
+getGenericType()函数直接返回了当前指定泛型的实际类型。T.class这样的语法在Java中是不合法的，而在Kotlin中，借助泛型实化功能就可以使用T::class.java这样的语法了。
+
+现在我们可以使用如下代码对getGenericType()函数进行测试：
+
+```kotlin
+fun main() {
+    val result1 = getGenericType<String>()
+    val result2 = getGenericType<Int>()
+    println("result1 is $result1")
+    println("result2 is $result2")
+}
+```
+
+这里给getGenericType()函数指定了两种不同的泛型，由于getGenericType()函数会将指定泛型的具体类型返回，因此这里我们将返回的结果进行打印。
+
+![image-20230408182223007](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230408182223007.png)
+
+
+
+### 2.泛型实化的应用
+
+泛型实化在Android项目当中具体应用。
+
+```kotlin
+val intent = Intent(context, TestActivity::class.java)
+context.startActivity(intent)
+```
+
+Kotlin的泛型实化功能使得我们拥有了更好的选择。
+
+新建一个reified.kt文件，然后在里面编写如下代码：
+
+```kotlin
+inline fun <reified T> startActivity(context: Context) {
+	val intent = Intent(context, T::class.java)
+	context.startActivity(intent)
+}
+```
+
+现在，如果我们想要启动TestActivity，只需要这样写就可以了：
+
+```kotlin
+startActivity<TestActivity>(context)
+```
+
+Kotlin将能够识别出指定泛型的实际类型，并启动相应的Activity。
+
+> 怎么样，是不是觉得代码瞬间精简了好多？这就是泛型实化所带来的神奇功能。
+
+不过，现在的startActivity()函数其实还是有问题的，因为通常在启用Activity的时候还可能会使用Intent附带一些参数，比如下面的写法：
+
+```kotlin
+val intent = Intent(context, TestActivity::class.java)
+intent.putExtra("param1", "data")
+intent.putExtra("param2", 123)
+context.startActivity(intent)
+```
+
+借助高阶函数就可以轻松搞定。
+
+回到reified.kt文件当中，这里添加一个新的startActivity()函数重载，如下所示：
+
+```kotlin
+inline fun <reified T> startActivity(context: Context, block: Intent.() -> Unit) {
+	val intent = Intent(context, T::class.java)
+	intent.block()
+	context.startActivity(intent)
+}
+```
+
+这次的startActivity()函数中增加了一个函数类型参数，并且它的函数类型是定义在Intent类当中的。在创建完Intent的实例之后，随即调用该函数类型参数，并把Intent的实例传入，这样调用startActivity()函数的时候就可以在Lambda表达式中为Intent传递参数了，如下所示：
+
+```kotlin
+startActivity<TestActivity>(context) {
+	putExtra("param1", "data")
+	putExtra("param2", 123)
+}
+```
+
+> 这种启动Activity的代码写起来实在是太舒服了，泛型实化和高阶函数使这种语法结构成为了可能，感谢Kotlin提供了如此多优秀的语言特性。
+
+
+
+### 3.泛型的协变
+
+如果某个方法接收一个`List<Person>`类型的参数，而我们传入一个`List<Student>`的实例，这样合不合法呢？
+
+看上去好像也挺正确的，但是Java中是不允许这么做的，因为`List<Student>`不能成为`List<Person>`的子类，否则将可能存在类型转换的安全隐患。
+
+为什么会存在类型转换的安全隐患呢？
+
+下面通过一个具体的例子进行说明。这里自定义一个SimpleData类，代码如下所示：
+
+```kotlin
+class SimpleData<T> {
+    private var data: T? = null
+    fun set(t: T?) {
+        data = t
+    }
+    fun get(): T? {
+        return data
+    }
+}
+```
+
+SimpleData是一个泛型类，它的内部封装了一个泛型data字段，调用set()方法可以给data字段赋值，调用get()方法可以获取data字段的值。
+
+接着我们假设，如果编程语言允许向某个接收`SimpleData<Person>`参数的方法传入`SimpleData<Student>`的实例，那么如下代码就会是合法的：
+
+```kotlin
+fun main() {
+    val student = Student("Tom", 19)
+    val data = SimpleData<Student>()
+    data.set(student)
+    handleSimpleData(data) // 实际上这行代码会报错，这里假设它能编译通过
+    val studentData = data.get()
+}
+fun handleSimpleData(data: SimpleData<Person>) {
+    val teacher = Teacher("Jack", 35)
+    data.set(teacher)
+}
+```
+
+如何才能让`MyClass<A>`成为`MyClass<B>`的子类型呢？
+
+T只能出现在out位置上，而不能出现在in位置上：
+
+```kotlin
+class SimpleData<out T>(val data: T?) {
+    fun get(): T? {
+        return data
+    }
+}
+```
+
+这里我们对SimpleData类进行了改造，在泛型T的声明前面加上了一个out关键字。这就意味着现在T只能出现在out位置上，而不能出现在in位置上，同时也意味着SimpleData在泛型T上是协变的。
+
+由于泛型T不能出现在in位置上，因此我们也就不能使用set()方法为data参数赋值了，所以这里改成了使用构造函数的方式来赋值。你可能会说，构造函数中的泛型T不也是在in位置上的吗？没错，但是由于这里我们使用了val关键字，所以构造函数中的泛型T仍然是只读的，因此这样写是合法且安全的。另外，即使我们使用了var关键字，但只要给它加上private修饰符，保证这个泛型T对于外部而言是不可修改的，那么就都是合法的写法。
+
+经过了这样的修改之后，下面的代码就可以完美编译通过且没有任何安全隐患了：
+
+```kotlin
+fun main() {
+    val student = Student("Tom", 19)
+    val data = SimpleData<Student>(student)
+    handleMyData(data)
+    val studentData = data.get()
+}
+fun handleMyData(data: SimpleData<Person>) {
+    val personData = data.get()
+}
+```
+
+由于SimpleData类已经进行了协变声明，那么`SimpleData<Student>`自然就是`SimpleData<Person>`的子类了，所以这里可以安全地向`handleMyData()`方法中传递参数。
+
+然后在handleMyData()方法中去获取SimpleData封装的数据，虽然这里泛型声明的是Person类型，实际获得的会是一个Student的实例，但由于Person是Student的父类，向上转型是完全安全的，所以这段代码没有任何问题。
+
+学到这里，关于协变的内容你就掌握得差不多了，不过最后还有个例子需要回顾一下。
+
+前面提到，如果某个方法接收一个`List<Person>`类型的参数，而传入的却是一个`List<Student>`的实例，在Java中是不允许这么做的。
+
+在Kotlin中这么做是合法的，因为Kotlin已经默认给许多内置的API加上了协变声明，其中就包括了各种集合的类与接口。
+
+### 4.泛型的逆变
+
+逆变可以在泛型类型的声明中使用in关键字来指定，例如：
+
+```kotlin
+interface Comparator<in T> {
+    fun compare(a: T, b: T): Int
+}
+```
+
+逆变功能在Kotlin内置API中的应用，比较典型的例子就是Comparable的使用。Comparable是一个用于比较两个对象大小的接口，其源码定义如下：
+
+```kotlin
+interface Comparable<in T> {
+	operator fun compareTo(other: T): Int
+}
+```
+
+如果我们使用`Comparable<Person>`实现了让两个Person对象比较大小的逻辑，那么用这段逻辑去比较两个Student对象的大小也一定是成立的，因此让`Comparable<Person>`成为`Comparable<Student>`的子类合情合理，这也是逆变非常典型的应用。
+
+## 17.协程
+
+> 协程属于Kotlin中非常有特色的一项技术，因为大部分编程语言中是没有协程这个概念的。
+
+协程允许我们在单线程模式下模拟多线程编程的效果，代码执行时的挂起与恢复完全是由编程语言来控制的，和操作系统无关。
+
+### 1.协程的基本用法
+
+#### 基本用法
+
+Kotlin并没有将协程纳入标准库的API当中，而是以依赖库的形式提供的。所以如果我们想要使用协程功能，需要先在app/build.gradle文件当中添加如下依赖库：
+
+```groovy
+dependencies {
+    ...
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.1.1"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.1.1"
+}
+```
+
+接下来创建一个CoroutinesTest.kt文件，并定义一个main()函数。
+
+首先我们要面临的第一个问题就是，如何开启一个协程？
+
+最简单的方式就是使用Global.launch函数，如下所示：
+
+```kotlin
+fun main() {
+    GlobalScope.launch {
+        println("codes run in coroutine scope")
+    }
+}
+```
+
+GlobalScope.launch函数可以创建一个协程的作用域，这样传递给launch函数的代码块（Lambda表达式）就是在协程中运行的了，这里我们只是在代码块中打印了一行日志。
+
+**那么现在运行main()函数，日志能成功打印出来吗？如果你尝试一下，会发现没有任何日志输出。**
+
+这是因为，Global.launch函数每次创建的都是一个顶层协程，这种协程当应用程序运行结束时也会跟着一起结束。刚才的日志之所以无法打印出来，就是因为代码块中的代码还没来得及运行，应用程序就结束了。
+
+观察如下代码：
+
+```kotlin
+fun main() {
+    GlobalScope.launch {
+        println("codes run in coroutine scope")
+        delay(1500)
+        println("codes run in coroutine scope finished")
+    }
+    Thread.sleep(1000)
+}
+```
+
+我们在代码块中加入了一个delay()函数，并在之后又打印了一行日志。
+
+delay()函数可以让当前协程延迟指定时间后再运行，但它和Thread.sleep()方法不同。
+
+delay()函数是一个非阻塞式的挂起函数，它只会挂起当前协程，并不会影响其他协程的运行。
+
+而Thread.sleep()方法会阻塞当前的线程，这样运行在该线程下的所有协程都会被阻塞。
+
+注意，delay()函数只能在协程的作用域或其他挂起函数中调用。
+
+这里我们让协程挂起1.5秒，但是主线程却只阻塞了1秒，最终会是什么结果呢？重新运行程序，你会发现代码块中**新增的一条日志并没有打印出来**，因为它还没能来得及运行，应用程序就已经结束了。
+
+借助runBlocking函数：
+
+```kotlin
+fun main() {
+    runBlocking {
+        println("codes run in coroutine scope")
+        delay(1500)
+        println("codes run in coroutine scope finished")
+    }
+}
+```
+
+![image-20230408195748599](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230408195748599.png)
+
+runBlocking函数同样会创建一个协程的作用域，但是它可以保证在协程作用域内的所有代码和子协程没有全部执行完之前一直阻塞当前线程。
+
+使用方法：
+
+```kotlin
+fun main() {
+    val job = GlobalScope.launch {
+        println("codes run in coroutine scope")
+    }
+    runBlocking {
+        job.join() // 等待协程执行结束
+    }
+}
+```
+
+> 需要注意的是，runBlocking函数通常只应该在测试环境下使用，在正式环境中使用容易产生一些性能上的问题。
+
+#### 创建多个协程
+
+```kotlin
+fun main() {
+    runBlocking {
+        launch {
+            println("launch1")
+            delay(1000)
+            println("launch1 finished")
+        }
+        launch {
+            println("launch2")
+            delay(1000)
+            println("launch2 finished")
+        }
+    }
+}
+```
+
+![image-20230408212257430](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230408212257430.png)
+
+注意这里的launch函数和我们刚才所使用的GlobalScope.launch函数不同。
+
+首先它必须在协程的作用域中才能调用，其次它会在当前协程的作用域下创建子协程。
+
+子协程的特点是如果外层作用域的协程结束了，该作用域下的所有子协程也会一同结束。
+
+相比而言，GlobalScope.launch函数创建的永远是顶层协程，这一点和线程比较像，因为线程也没有层级这一说，永远都是顶层的。
+
+两个子协程中的日志是交替打印的，说明它们确实是像多线程那样并发运行的。然而这两个子协程实际却运行在同一个线程当中，只是由编程语言来决定如何在多个协程之间进行调度，让谁运行，让谁挂起。调度的过程完全不需要操作系统参与，这也就使得协程的并发效率会出奇得高。
+
+那么具体会有多高呢？来做下实验，代码如下所示：
+
+```kotlin
+fun main() {
+    val start = System.currentTimeMillis()
+    runBlocking {
+        repeat(100000) {
+            launch {
+                println(".")
+            }
+        }
+    }
+    val end = System.currentTimeMillis()
+    println(end - start)
+}
+```
+
+使用repeat函数循环创建了10万个协程，不过在协程当中并没有进行什么有意义的操作，只是象征性地打印了一个点，然后记录一下整个操作的运行耗时。现在重新运行一下程序：
+
+![image-20230408213716093](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230408213716093.png)
+
+可以看到，这里仅仅耗时了961毫秒，这足以证明协程有多么高效。试想一下，如果开启的是10万个线程，程序或许已经出现OOM异常了。
+
+#### 创建一个新的协程作用域--coroutineScope函数
+
+随着launch函数中的逻辑越来越复杂，可能你需要将部分代码提取到一个单独的函数中。这个时候就产生了一个问题：我们在launch函数中编写的代码是拥有协程作用域的，但是提取到一个单独的函数中就没有协程作用域了，那么我们该如何调用像delay()这样的挂起函数呢？
+
+为此Kotlin提供了一个suspend关键字，使用它可以将任意函数声明成挂起函数，而挂起函数之间都是可以互相调用的，如下所示：
+
+```kotlin
+suspend fun printDot() {	//这样就可以在printDot()函数中调用delay()函数了
+    println(".")
+    delay(1000)
+}
+```
+
+但是，suspend关键字只能将一个函数声明成挂起函数，是无法给它提供协程作用域的。比如尝试在printDot()函数中调用launch函数，一定是无法调用成功的，因为launch函数要求必须在协程作用域当中才能调用。
+
+这个问题可以借助coroutineScope函数来解决。
+
+coroutineScope函数也是一个挂起函数，因此可以在任何其他挂起函数中调用。它的特点是会继承外部的协程的作用域并创建一个子协程，借助这个特性，我们就可以给任意挂起函数提供协程作用域了。示例写法如下：
+
+```kotlin
+suspend fun printDot() = coroutineScope {
+    launch {
+        println(".")
+        delay(1000)
+    }
+}
+```
+
+可以看到，现在我们就可以在printDot()这个挂起函数中调用launch函数了。
+
+另外，coroutineScope函数和runBlocking函数还有点类似，它可以保证其作用域内的所有代码和子协程在全部执行完之前，外部的协程会一直被挂起。
+
+示例代码：
+
+```kotlin
+fun main() {
+    runBlocking {
+        coroutineScope {
+            launch {
+                for (i in 1..10) {
+                    println(i)
+                    delay(1000)
+                }
+            }
+        }
+        println("coroutineScope finished")
+    }
+    println("runBlocking finished")
+}
+```
+
+这里先使用runBlocking函数创建了一个协程作用域，然后调用coroutineScope函数创建了一个子协程。在coroutineScope的作用域中，我们又调用launch函数创建了一个子协程，并通过for循环依次打印数字1到10，每次打印间隔一秒钟。最后在runBlocking和coroutineScope函数的结尾，分别又打印了一行日志。现在重新运行一下程序，结果如图：
+
+![image-20230408220927019](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230408220927019.png)
+
+控制台会以1秒钟的间隔依次输出数字1到10，然后才会打印coroutineScope函
+数结尾的日志，最后打印runBlocking函数结尾的日志。
+
+由此可见，coroutineScope函数确实是将外部协程挂起了，只有当它作用域内的所有代码和协程都执行完毕之后，coroutineScope函数之后的代码才能得到运行。
+
+`coroutineScope`函数和`runBlocking`函数都可以用来创建协程作用域，但是它们的主要区别在于对于所在的协程的影响不同。
+
+`runBlocking`函数会阻塞当前线程，直到它所包含的所有协程执行完成后才会返回。因此，`runBlocking`函数不应该在Android主线程或任何UI线程中使用，因为它会阻塞UI线程，导致应用程序失去响应。
+
+相比之下，`coroutineScope`函数不会阻塞当前线程。它只会暂停当前协程，并且在所有子协程执行完成后才会返回。因此，`coroutineScope`函数更适合在Android中使用，因为它不会阻塞UI线程。
+
+|                  | coroutineScope函数                                           | runBlocking函数                                      |
+| ---------------- | ------------------------------------------------------------ | ---------------------------------------------------- |
+| 作用             | 创建一个新的协程作用域，以便可以并发运行多个协程             | 阻塞当前线程，等待协程执行完成                       |
+| 可以使用的上下文 | **只能在已经有协程作用域的协程中使用**                       | 可以在任何地方使用                                   |
+| 返回值           | 协程执行完成后函数返回                                       | 协程执行完成后函数返回                               |
+| 可取消性         | 调用cancel()函数只能取消作用域中的所有子协程，无法取消作用域本身 | 可以通过cancel()函数取消作用域本身和其中的所有子协程 |
+| 异常处理         | 可以使用try-catch语句捕获协程作用域中的异常                  | 可以使用try-catch语句捕获协程作用域中的异常          |
+
+### 2.更多的作用域构建器
+
+GlobalScope.launch、runBlocking、launch、coroutineScope这几种作用域构建器，它们都可以用于创建一个新的协程作用域。
+
+不过GlobalScope.launch和runBlocking函数是可以在任意地方调用的，coroutineScope函数可以在协程作用域或挂起函数中调用，而launch函数只能在协程作用域中调用。
+
+runBlocking由于会阻塞线程，因此只建议在测试环境下使用。而GlobalScope.launch由于每次创建的都是顶层协程，一般也不太建议使用，除非你非常明确就是要创建顶层协程。
+
+为什么说不太建议使用顶层协程呢？主要还是因为它管理起来成本太高了。举个例子，比如在某个Activity中使用协程发起了一条网络请求，由于网络请求是耗时的，用户在服务器还没来得及响应的情况下就关闭了当前Activity，此时按理说应该取消这条网络请求，或者至少不应该进行回调，因为Activity已经不存在了，回调了也没有意义。
+
+那么协程要怎样取消呢？不管是GlobalScope.launch函数还是launch函数，它们都会返回一个Job对象，只需要调用Job对象的cancel()方法就可以取消协程了，如下所示：
+
+```kotlin
+val job = GlobalScope.launch {
+	// 处理具体的逻辑
+}
+job.cancel()
+```
+
+但是如果我们每次创建的都是顶层协程，那么当Activity关闭时，就需要逐个调用所有已创建协程的cancel()方法，这样的代码根本无法维护。
+
+#### CoroutineScope()函数
+
+实际项目中比较常用的写法：
+
+```kotlin
+val job = Job()
+val scope = CoroutineScope(job)
+scope.launch {
+	// 处理具体的逻辑
+}
+job.cancel()
+```
+
+我们先创建了一个Job对象，然后把它传入CoroutineScope()函数当中。
+
+> 注意这里的CoroutineScope()是个函数，虽然它的命名更像是一个类。
+
+CoroutineScope()函数会返回一个CoroutineScope对象，这种语法结构的设计更像是我们创建了一个CoroutineScope的实例，可能也是Kotlin有意为之的。
+
+有了CoroutineScope对象之后，就可以随时调用它的launch函数来创建一个协程了。
+
+现在所有调用CoroutineScope的launch函数所创建的协程，都会被关联在Job对象的作用域下面。
+
+这样只需要调用一次cancel()方法，就可以将同一作用域内的所有协程全部取消，从而大大降低了协程管理的成本。
+
+> launch函数只能用于执行一段逻辑，却不能获取执行的结果，因为它的返回值是一个Job对象。
+>
+> 那么有没有什么办法能够创建一个协程并获取它的执行结果呢？
+
+#### async函数
+
+async函数必须在协程作用域当中才能调用，它会创建一个新的子协程并返回一个Deferred对象，如果我们想要获取async函数代码块的执行结果，只需要调用Deferred对象的await()方法即可，代码如下所示：
+
+```kotlin
+suspend fun doSomething(): Int {
+    delay(1000) // 模拟耗时操作
+    return 42
+}
+
+fun main() {
+    runBlocking {
+        val deferredResult = async { doSomething() }
+        // 可以在这里执行一些其他的任务
+        val result = deferredResult.await() // 等待异步任务完成并获取结果
+        println("The result is: $result")
+    }
+}
+```
+
+在上面的示例中，我们通过 `async` 函数启动一个异步任务，并使用 `await` 函数来等待任务完成并获取其返回结果。
+
+当调用`await()`方法时，如果代码块中的代码还没执行完，那么`await()`方法会将当前协程阻塞住，直到可以获得async函数的执行结果。
+
+在 `async` 函数的代码块中，我们调用了 `doSomething()` 函数来模拟一些耗时操作，并返回一个整数值 42。在 `runBlocking` 作用域中，我们首先通过 `async` 函数启动了一个异步任务，然后可以在等待异步任务完成的过程中执行一些其他的任务，最后通过 `await` 函数来获取异步任务的结果并打印输出。
+
+#### withContext()函数
+
+> 一个比较特殊的作用域构建器,大体可以将它理解成async函数的一种简化版写法
+
+```kotlin
+fun main() {
+    runBlocking {
+        val result = withContext(Dispatchers.Default) {
+            5 + 5
+        }
+        println(result)
+    }
+}
+```
+
+调用withContext()函数之后，会立即执行代码块中的代码，同时将外部协程挂起。当代码块中的代码全部执行完之后，会将最后一行的执行结果作为withContext()函数的返回值返回，因此基本上相当于val result = async{ 5 + 5}.await()的写法。唯一不同的是，withContext()函数强制要求我们指定一个线程参数。
+
+> Android中要求网络请求必须在子线程中进行，即使你开启了协程去执行网络请求，假如它是主线程当中的协程，那么程序仍然会出错。
+
+这个时候我们就应该通过线程参数给协程指定一个具体的运行线程。
+
+以下是各个线程参数的简介和使用场景：
+
+| 线程参数               | 简介                                                         | 使用场景                                                     |
+| ---------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| Dispatchers.Default    | 非常适合执行 CPU 密集型的工作，比如执行一些复杂的计算任务，因为它使用的是一个线程池，线程数与 CPU 核心数相等，同时不会影响主线程的性能 | 执行一些复杂的计算任务，不会阻塞主线程                       |
+| Dispatchers.IO         | 非常适合执行 I/O 密集型的工作，比如进行网络请求、读写文件等等，因为它使用的是一个线程池，线程数可以大于 CPU 核心数，能够最大化的利用 I/O 等待时间 | 进行网络请求、读写文件等等操作，能够在不阻塞主线程的情况下完成 |
+| Dispatchers.Main       | 专门用来进行 UI 操作，因为只有主线程才能够更新 UI，所以如果需要进行 UI 操作，那么就必须要在主线程中执行 | 执行 UI 操作，更新 UI,这个值只能在Android项目中使用          |
+| Dispatchers.Unconfined | 不会指定特定的线程来执行协程体，而是在调用协程体的线程中执行。也就是说，它根本没有办法保证协程体执行的线程 | 一般情况下不会使用到，但在某些情况下可以使用，例如当一个协程体的执行需要在不同线程之间切换，且需要保证某些数据在切换线程之后还能够被正确传递时 |
+
+> 协程的主要用途就是可以大幅度地提升并发编程的运行效率
+
+实际上，Kotlin中的协程还可以对传统回调的写法进行优化，从而让代码变得更加简洁。
+
+### 3.使用协程简化回调的写法
+
+传统回调->使用匿名类：
+
+```kotlin
+HttpUtil.sendHttpRequest(address, object : HttpCallbackListener {
+    override fun onFinish(response: String) {
+// 得到服务器返回的具体内容
+    }
+    override fun onError(e: Exception) {
+// 在这里对异常情况进行处理
+    }
+})
+```
+
+在多少个地方发起网络请求，就需要编写多少次这样的匿名类实现。
+
+借助suspendCoroutine函数就能将传统回调机制的写法大幅简化：
+
+suspendCoroutine函数必须在协程作用域或挂起函数中才能调用，它接收一个Lambda表达式参数，主要作用是将当前协程立即挂起，然后在一个普通的线程中执行Lambda表达式中的代码。Lambda表达式的参数列表上会传入一个Continuation参数，调用它的resume()方法或resumeWithException()可以让协程恢复执行。
+
+借助这个函数来对传统的回调写法进行优化。首先定义一个request()函数，代码如下所示：
+
+```kotlin
+suspend fun request(address: String): String {
+    return suspendCoroutine { continuation ->
+        HttpUtil.sendHttpRequest(address, object : HttpCallbackListener {
+            override fun onFinish(response: String) {
+                continuation.resume(response)
+            }
+            override fun onError(e: Exception) {
+                continuation.resumeWithException(e)
+            }
+        })
+    }
+}
+```
+
+可以看到，request()函数是一个挂起函数，并且接收一个address参数。
+
+在request()函数的内部，我们调用了刚刚介绍的suspendCoroutine函数，这样当前协程就会被立刻挂起，而Lambda表达式中的代码则会在普通线程中执行。接着我们在Lambda表达式中调用HttpUtil.sendHttpRequest()方法发起网络请求，并通过传统回调的方式监听请求结果。
+
+如果请求成功就调用Continuation的resume()方法恢复被挂起的协程，并传入服务器响应的数据，该值会成为suspendCoroutine函数的返回值。如果请求失败，就调用Continuation的resumeWithException()恢复被挂起的协程，并传入具体的异常原因。
+
+之后我们要发起多少次网络请求，都不需要再重复进行回调实现了。
+
+```kotlin
+suspend fun getBaiduResponse() {
+    try {
+        val response = request("https://www.baidu.com/")
+// 对服务器响应的数据进行处理
+    } catch (e: Exception) {
+// 对异常情况进行处理
+    }
+}
+```
+
+由于 getBaiduResponse()是一个挂起函数，因此当它调用了request()函数时，当前的协程就会被立刻挂起，然后一直等待网络请求成功或失败后，当前协程才能恢复运行。这样即使不使用回调的写法，我们也能够获得异步网络请求的响应数据，而如果请求失败，则会直接进入catch语句当中。
+
+不过这里，getBaiduResponse()函数被声明成了挂起函数，这样它也只能在协程作用域或其他挂起函数中调用了，使用起来有局限性。suspendCoroutine函数本身就是要结合协程一起使用的。
+
+事实上，suspendCoroutine函数几乎可以用于简化任何回调的写法，比如使用Retrofit来发起网络请求需要这样写：
+
+```kotlin
+val appService = ServiceCreator.create<AppService>()
+appService.getAppData().enqueue(object : Callback<List<App>> {
+    override fun onResponse(call: Call<List<App>>, response: Response<List<App>>) {
+// 得到服务器返回的数据
+    }
+    override fun onFailure(call: Call<List<App>>, t: Throwable) {
+// 在这里对异常情况进行处理
+    }
+})
+```
+
+使用suspendCoroutine函数，对上述写法进行大幅度的简化。
+
+由于不同的Service接口返回的数据类型也不同，所以这次不能像刚才那样针对具体的类型进行编程了，而是要使用泛型的方式。定义一个await()函数，代码如下所示：
+
+```kotlin
+suspend fun <T> Call<T>.await(): T {
+    return suspendCoroutine { continuation ->
+        enqueue(object : Callback<T> {
+            override fun onResponse(call: Call<T>, response: Response<T>) {
+                val body = response.body()
+                if (body != null) continuation.resume(body)
+                else continuation.resumeWithException(
+                    RuntimeException("response body is null"))
+            }
+            override fun onFailure(call: Call<T>, t: Throwable) {
+                continuation.resumeWithException(t)
+            }
+        })
+    }
+}
+```
+
+这段代码相比于刚才的request()函数又复杂了一点。首先await()函数仍然是一个挂起函数，然后给它声明了一个泛型T，并将await()函数定义成了Call<T>的扩展函数，这样所有返回值是Call类型的Retrofit网络请求接口就都可以直接调用await()函数了。
+
+接着，await()函数中使用了suspendCoroutine函数来挂起当前协程，并且由于扩展函数的原因，我们现在拥有了Call对象的上下文，那么这里就可以直接调用enqueue()方法让Retrofit发起网络请求。接下来，使用同样的方式对Retrofit响应的数据或者网络请求失败的情况进行处理就可以了。另外还有一点需要注意，在onResponse()回调当中，我们调用body()方法解析出来的对象是可能为空的。如果为空的话，这里的做法是手动抛出一个异常，你也可以根据自己的逻辑进行更加合适的处理。
+
+有了await()函数之后，我们调用所有Retrofit的Service接口都会变得极其简单，比如刚才同样的功能就可以使用如下写法进行实现：
+
+```kotlin
+suspend fun getAppData() {
+    try {
+        val appList = ServiceCreator.create<AppService>().getAppData().await()
+// 对服务器响应的数据进行处理
+    } catch (e: Exception) {
+// 对异常情况进行处理
+    }
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
