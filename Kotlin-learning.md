@@ -1485,55 +1485,713 @@ fun StringBuilder.build(block: StringBuilder.() -> Unit): StringBuilder {
 
 这个高阶函数的作用与apply函数类似，都可以为Lambda表达式提供一个指定的上下文，并且使用Lambda表达式来连续调用同一个对象的多个方法。
 
+现在就可以使用自己创建的build函数来简化StringBuilder构建字符串的方式了。这里仍然用吃水果这个功能来举例：
+
+```kotlin
+fun main() {
+    val list = listOf("Apple", "Banana", "Orange", "Pear", "Grape")
+    val result = StringBuilder().build {
+        append("Start eating fruits.\n")
+        for (fruit in list) {
+            append(fruit).append("\n")
+        }
+        append("Ate all fruits.")
+    }
+    println(result.toString())
+}
+```
+
+### 2.内联函数的作用
+
+举例num1AndNum2()函数:
+
+```kotlin
+fun num1AndNum2(num1: Int, num2: Int, operation: (Int, Int) -> Int): Int {
+    val result = operation(num1, num2)
+    return result
+}
+fun main() {
+    val num1 = 100
+    val num2 = 80
+    val result = num1AndNum2(num1, num2) { n1, n2 ->
+        n1 + n2
+    }
+}
+```
+
+可以看到，上述代码中调用了`num1AndNum2()`函数，并通过Lambda表达式指定对传入的两个整型参数进行求和。
+
+这段代码在Kotlin中非常好理解，因为这是高阶函数最基本的用法。可是Kotlin的代码最终还是要编译成Java字节码的，但Java中并没有高阶函数的概念。
+
+Kotlin的编译器会将这些高阶函数的语法转换成Java支持的语法结构，上述的Kotlin代码大致会被转换成如下Java代码：
+
+```java
+public static int num1AndNum2(int num1, int num2, Function operation) {
+    int result = (int) operation.invoke(num1, num2);
+    return result;
+}
+public static void main() {
+    int num1 = 100;
+    int num2 = 80;
+    int result = num1AndNum2(num1, num2, new Function() {
+        @Override
+        public Integer invoke(Integer n1, Integer n2) {
+            return n1 + n2;
+        }
+    });
+}
+```
+
+可以看到，在这里num1AndNum2()函数的第三个参数变成了一个Function接口，这是一种Kotlin内置的接口，里面有一个待实现的invoke()函数。而num1AndNum2()函数其实就是调用了Function接口的invoke()函数，并把num1和num2参数传了进去。
+
+在调用num1AndNum2()函数的时候，之前的Lambda表达式在这里变成了Function接口的匿名类实现，然后在invoke()函数中实现了n1 + n2的逻辑，并将结果返回。
+
+原来我们一直使用的Lambda表达式在底层被转换成了匿名类的实现方式。这就表明，我们每调用一次Lambda表达式，都会创建一个新的匿名类实例，当然也会造成额外的内存和性能开销。
+为了解决这个问题，Kotlin提供了内联函数的功能，它可以将使用Lambda表达式带来的运行时开销完全消除。
 
 
 
+内联函数的用法，只需要在定义高阶函数时加上inline关键字的声明即可:
+
+```kotlin
+inline fun num1AndNum2(num1: Int, num2: Int, operation: (Int, Int) -> Int): Int {
+    val result = operation(num1, num2)
+    return result
+}
+```
+
+Kotlin编译器会将内联函数中的代码在编译的时候自动替换到调用它的地方，这样也就不存在运行时的开销了。
+
+内联函数的代码替换过程：
+
+首先，Kotlin编译器会将Lambda表达式中的代码替换到函数类型参数调用的地方：
+
+![image-20230408152100632](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230408152100632.png)
+
+再将内联函数中的全部代码替换到函数调用的地方：
+
+![image-20230408152153453](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230408152153453.png)
+
+最终的代码就被替换成了：
+
+![image-20230408152206640](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230408152206640.png)
+
+正是如此，内联函数才能完全消除Lambda表达式所带来的运行时开销。
+
+### 3.noinline与crossinline
+
+> 一个高阶函数中如果接收了两个或者更多函数类型的参数，这时我们给函数加上了inline关键字，那么Kotlin编译器会自动将所有引用的Lambda表达式全部进行内联。
+> 但是，如果只想内联其中的一个Lambda表达式该怎么办呢？
+
+使用noinline关键字了，如下所示：
+
+```kotlin
+inline fun inlineTest(block1: () -> Unit, noinline block2: () -> Unit) {
+}
+```
+
+可以看到，这里使用inline关键字声明了inlineTest()函数，原本block1和block2这两个函数类型参数所引用的Lambda表达式都会被内联。但是我们在block2参数的前面又加上了一个noinline关键字，那么现在就只会对block1参数所引用的Lambda表达式进行内联了。这就是noinline关键字的作用。
+
+> 为什么Kotlin还要提供一个noinline关键字来排除内联功能呢？
+
+因为内联的函数类型参数在编译的时候会被进行代码替换，因此它没有真正的参数属性。非内联的函数类型参数可以自由地传递给其他任何函数，因为它就是一个真实的参数，而内联的函数类型参数只允许传递给另外一个内联函数，这也是它最大的局限性。
+
+另外，内联函数和非内联函数还有一个重要的区别，那就是**内联函数所引用的Lambda表达式中是可以使用return关键字来进行函数返回的**，而非内联函数只能进行局部返回。
+
+例子：
+
+```kotlin
+fun printString(str: String, block: (String) -> Unit) {
+    println("printString begin")
+    block(str)
+    println("printString end")
+}
+fun main() {
+    println("main start")
+    val str = ""
+    printString(str) { s ->
+        println("lambda start")
+        if (s.isEmpty()) return@printString
+        println(s)
+        println("lambda end")
+    }
+    println("main end")
+}
+```
+
+这里定义了一个叫作`printString()`的高阶函数,用于在Lambda表达式中打印传入的字符串参数。但是如果字符串参数为空，那么就不进行打印。
+
+> 注意，Lambda表达式中是不允许直接使用return关键字的，这里使用了return@printString的写法，表示进行局部返回退出当前printString()函数，并且不再执行Lambda表达式的剩余部分代码。
+
+![image-20230408153136355](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230408153136355.png)
+
+可以看到，除了Lambda表达式中return@printString语句之后的代码没有打印，其他的日志是正常打印的，说明return@printString确实只能进行局部返回。
+
+但是如果将`printString()`函数声明成一个内联函数，那么情况就不一样了，如下所示：
+
+```kotlin
+inline fun printString(str: String, block: (String) -> Unit) {
+    println("printString begin")
+    block(str)
+    println("printString end")
+}
+fun main() {
+    println("main start")
+    val str = ""
+    printString(str) { s ->
+        println("lambda start")
+        if (s.isEmpty()) return
+        println(s)
+        println("lambda end")
+    }
+    println("main end")
+}
+```
+
+现在printString()函数变成了内联函数，我们就可以在Lambda表达式中使用return关键字了。此时的return代表的是返回外层的调用函数，也就是main()函数。
+
+打印结果如图所示：
+
+![image-20230408153459843](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230408153459843.png)
+
+可以看到，不管是main()函数还是printString()函数，确实都在return关键字之后停止执行了，和我们所预期的结果一致。
 
 
 
+#### 使用内联函数可能出现的错误
+
+将高阶函数声明成内联函数是一种良好的编程习惯，事实上，绝大多数高阶函数是可以直接声明成内联函数的，但是也有少部分例外的情况。观察下面的代码示例：
+
+```kotlin
+inline fun runRunnable(block: () -> Unit) {
+    val runnable = Runnable {
+        block()
+    }
+    runnable.run()
+}
+```
+
+这段代码在没有加上inline关键字声明的时候绝对是可以正常工作的，但是在加上inline关键字之后就会提示如图错误：
+
+![image-20230408153649145](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230408153649145.png)
+
+这个错误出现的原因解释起来可能会稍微有点复杂。首先，在runRunnable()函数中，我们创建了一个Runnable对象，并在Runnable的Lambda表达式中调用了传入的函数类型参数。而Lambda表达式在编译的时候会被转换成匿名类的实现方式，也就是说，上述代码实际上是在匿名类中调用了传入的函数类型参数。
+
+而内联函数所引用的Lambda表达式允许使用return关键字进行函数返回，但是由于我们是在匿名类中调用的函数类型参数，此时是不可能进行外层调用函数返回的，最多只能对匿名类中的函数调用进行返回，因此这里就提示了上述错误。
+
+也就是说，如果我们在高阶函数中创建了另外的Lambda或者匿名类的实现，并且在这些实现中调用函数类型参数，此时再将高阶函数声明成内联函数，就一定会提示错误。
+那么是不是在这种情况下就真的无法使用内联函数了呢？也不是，比如借助crossinline关键字就可以很好地解决这个问题：
+
+```kotlin
+inline fun runRunnable(crossinline block: () -> Unit) {
+    val runnable = Runnable {
+        block()
+    }
+    runnable.run()
+}
+```
+
+可以看到，这里在函数类型参数的前面加上了crossinline的声明，代码就可以正常编译通过了。
+
+之所以会提示图所示的错误，就是因为内联函数的Lambda表达式中允许使用return关键字，和高阶函数的匿名类实现中不允许使用return关键字之间造成了冲突。
+
+而crossinline关键字就像一个契约，它用于保证在内联函数的Lambda表达式中一定不会使用return关键字，这样冲突就不存在了，问题也就巧妙地解决了。
+
+声明了crossinline之后，我们就无法在调用runRunnable函数时的Lambda表达式中使用return关键字进行函数返回了，但是仍然可以使用return@runRunnable的写法进行局部返回。
+
+总体来说，除了在return关键字的使用上有所区别之外，crossinline保留了内联函数的其他所有特性。
+
+## 12.高阶函数的应用
+
+### 1.简化SharedPreferences的用法
+
+写法：
+
+```kotlin
+getSharedPreferences("data", Context.MODE_PRIVATE).edit {
+    putString("name", "Tom")
+    putInt("age", 28)
+    putBoolean("married", false)
+}
+```
 
 
 
+原理：
+
+回顾一下SharedPreferences原来的用法。向SharedPreferences中存储数据的过程大致可以分为以下3步：
+
+1. 调用SharedPreferences的edit()方法获取SharedPreferences.Editor对象；
+2. 向SharedPreferences.Editor对象中添加数据；
+3. 调用apply()方法将添加的数据提交，完成数据存储操作。
+
+对应的代码示例如下：
+
+```kotlin
+val editor = getSharedPreferences("data", Context.MODE_PRIVATE).edit()
+editor.putString("name", "Tom")
+editor.putInt("age", 28)
+editor.putBoolean("married", false)
+editor.apply()
+```
+
+尝试使用高阶函数简化SharedPreferences的用法：
+
+新建一个SharedPreferences.kt文件，然后在里面加入如下代码：
+
+```kotlin
+fun SharedPreferences.open(block: SharedPreferences.Editor.() -> Unit) {
+    val editor = edit()
+    editor.block()
+    editor.apply()
+}
+```
+
+首先，我们通过扩展函数的方式向SharedPreferences类中添加了一个open函数，并且它还接收一个函数类型的参数，因此open函数自然就是一个高阶函数了。
+
+由于open函数内拥有SharedPreferences的上下文，因此这里可以直接调用edit()方法来获取SharedPreferences.Editor对象。
+
+另外open函数接收的是一个`SharedPreferences.Editor`的函数类型参数，因此这里需要调用`editor.block()`对函数类型参数进行调用，我们就可以在函数类型参数的具体实现中添加数据了。最后还要调用`editor.apply()`方法来提交数据，从而完成数据存储操作。
+
+定义好了open函数之后，以后在项目中使用SharedPreferences存储数据就会更加方便了，写法如下所示：
+
+```kotlin
+getSharedPreferences("data", Context.MODE_PRIVATE).open {
+    putString("name", "Tom")
+    putInt("age", 28)
+    putBoolean("married", false)
+}
+```
+
+可以看到，我们可以直接在SharedPreferences对象上调用open函数，然后在Lambda表达式中完成数据的添加操作。注意，现在Lambda表达式拥有的是
+SharedPreferences.Editor的上下文环境，因此这里可以直接调用相应的put方法来添加数据。最后我们也不再需要调用apply()方法来提交数据了，因为open函数会自动完成提交操作。
+
+其实Google提供的KTX扩展库中已经包含了上述SharedPreferences的简化用法，这个扩展库会在Android Studio创建项目的时候自动引入build.gradle的dependencies中。
+
+![image-20230408155414040](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230408155414040.png)
 
 
 
+### 2.简化ContentValues的用法
+
+ContentValues主要用于结合SQLiteDatabase的API存储和修改数据库中的数据
+
+KTX库中提供了contentValuesOf()方法，用法如下所示：
+
+```kotlin
+val values = contentValuesOf("name" to "Game of Thrones", "author" to "George Martin","pages" to 720, "price" to 20.85)
+db.insert("Book", null, values)
+```
 
 
 
+原理：
+
+示例如下：
+
+```kotlin
+val values = ContentValues()
+values.put("name", "Game of Thrones")
+values.put("author", "George Martin")
+values.put("pages", 720)
+values.put("price", 20.85)
+db.insert("Book", null, values)
+```
+
+简化：
+
+新建一个ContentValues.kt文件，然后在里面定义一个cvOf()方法，如下所示：
+
+```kotlin
+fun cvOf(vararg pairs: Pair<String, Any?>): ContentValues {
+}
+```
+
+这个方法的作用是构建一个`ContentValues`对象，有几点我需要解释一下。首先，`cvOf()`方法接收了一个Pair参数，也就是使用A to B语法结构创建出来的参数类型，但是我们在参数前面加上了一个`vararg`关键字。
+
+其实**vararg对应的就是Java中的可变参数列表**，我们允许向这个方法传入0个、1个、2个甚至任意多个Pair类型的参数，这些参数都会被赋值到使用vararg声明的这一个变量上面，然后使用for-in循环可以将传入的所有参数遍历出来。
+
+再来看声明的Pair类型。由于Pair是一种键值对的数据结构，因此需要通过泛型来指定它的键和值分别对应什么类型的数据。ContentValues的所有键都是字符串类型的，这里可以直接将Pair键的泛型指定成String。但ContentValues的值却可以有多种类型（字符串型、整型、浮点型，甚至是null），所以我们需要将Pair值的泛型指定成Any?。这是因为Any是Kotlin中所有类的共同基类，相当于Java中的Object，而Any?则表示允许传入空值。
+
+为cvOf()方法实现功能逻辑，核心思路就是先创建一个ContentValues对
+象，然后遍历pairs参数列表，取出其中的数据并填入ContentValues中，最终将
+ContentValues对象返回即可。
+
+Pair参数的值是Any?类型的，使用when语句一一进行条件判断，并覆盖ContentValues所支持的所有数据类型。代码：
+
+```kotlin
+fun cvOf(vararg pairs: Pair<String, Any?>): ContentValues {
+    val cv = ContentValues()
+    for (pair in pairs) {
+        val key = pair.first
+        val value = pair.second
+        when (value) {
+            is Int -> cv.put(key, value)
+            is Long -> cv.put(key, value)
+            is Short -> cv.put(key, value)
+            is Float -> cv.put(key, value)
+            is Double -> cv.put(key, value)
+            is Boolean -> cv.put(key, value)
+            is String -> cv.put(key, value)
+            is Byte -> cv.put(key, value)
+            is ByteArray -> cv.put(key, value)
+            null -> cv.putNull(key)
+        }
+    }
+    return cv
+}
+```
+
+我们使用for-in循环遍历了pairs参数列表，在循环中取出了key和value，并使用when语句来判断value的类型。注意，这里将ContentValues所支持的所有数据类型全部覆盖了进去，然后将参数中传入的键值对逐个添加到ContentValues中，最终将ContentValues返回。
+
+> 这里还使用了Kotlin中的Smart Cast功能。比如when语句进入Int条件分支后，这个条件下面的value会被自动转换成Int类型，而不再是Any?类型。
+
+有了这个cvOf()方法之后，我们使用ContentValues时就会变得更加简单了，比如向数据库中插入一条数据就可以这样写：
+
+```kotlin
+val values = cvOf("name" to "Game of Thrones", "author" to "George Martin",
+    "pages" to 720, "price" to 20.85)
+db.insert("Book", null, values)
+```
+
+借助apply函数，cvOf()方法的实现将会变得更加优雅：
+
+```kotlin
+fun cvOf(vararg pairs: Pair<String, Any?>) = ContentValues().apply {
+    for (pair in pairs) {
+        val key = pair.first
+        val value = pair.second
+        when (value) {
+            is Int -> put(key, value)
+            is Long -> put(key, value)
+            is Short -> put(key, value)
+            is Float -> put(key, value)
+            is Double -> put(key, value)
+            is Boolean -> put(key, value)
+            is String -> put(key, value)
+            is Byte -> put(key, value)
+            is ByteArray -> put(key, value)
+            null -> putNull(key)
+        }
+    }
+}
+```
+
+由于apply函数的返回值就是它的调用对象本身，因此这里我们可以使用单行代码函数的语法糖，用等号替代返回值的声明。另外，apply函数的Lambda表达式中会自动拥有ContentValues的上下文，所以这里可以直接调用ContentValues的各种put方法。
+
+## 13.泛型
+
+### 泛型定义
+
+- 定义一个泛型类：
+
+    ```kotlin
+    class MyClass<T> {
+        fun method(param: T): T {
+            return param
+        }
+    }
+    ```
+
+    在调用MyClass类和method()方法的时候，就可以将泛型指定成具体的类型，如下所示：
+
+    ```kotlin
+    val myClass = MyClass<Int>()
+    val result = myClass.method(123)
+    ```
+
+- 定义一个泛型方法
+
+    只需要将定义泛型的语法结构写在方法名前面：
+
+    ```kotlin
+    class MyClass {
+        fun <T> method(param: T): T {
+            return param
+        }
+    }
+    ```
+
+    此时的调用方式：
+
+    ```kotlin
+    val myClass = MyClass()
+    val result = myClass.method<Int>(123)
+    ```
+
+    或者：
+
+    ```kotlin
+    val myClass = MyClass()
+    val result = myClass.method(123)	//类型推导
+    ```
+
+    
+
+    Kotlin中可以对泛型的类型进行限制，这个限制也被称为泛型约束。在定义泛型时，可以通过`where`关键字指定泛型的类型必须满足的约束条件。
+
+    常见的泛型约束条件有以下几种：
+
+    - 继承某个类或接口，使用`:`符号来指定，例如`<T : List<String>>`表示T必须是`List<String>`的子类或实现类。
+
+        ```kotlin
+        class MyClass {
+        	fun <T : Number> method(param: T): T {
+        		return param
+        	}
+        }
+        ```
+
+        这种写法就表明，我们只能将method()方法的泛型指定成数字类型，比如Int、Float、Double等。但是如果你指定成字符串类型，就肯定会报错，因为它不是一个数字。
+
+        另外，在默认情况下，所有的泛型都是可以指定成可空类型的，这是因为在不手动指定上界的时候，泛型的上界默认是`Any?`。而如果想要让泛型的类型不可为空，只需要将泛型的上界手动指定成`Any`就可以了。
+
+    - 多个约束条件，使用逗号`,`分隔开，例如`<T : List<String>, U : CharSequence>`表示T必须是`List<String>`的子类或实现类，U必须是`CharSequence`的子类或实现类。
+
+    - 使用`where`关键字指定，例如`<T> where T : List<String>, T : Comparable<T>>`表示T必须同时满足`List<String>`和`Comparable<T>`两个约束条件。
+
+    泛型约束可以帮助我们在编写代码时更好地控制泛型的类型，避免出现不合法的使用。同时，也可以在一定程度上提高代码的复用性和可读性。
+
+### 泛型应用
+
+build函数：
+
+```kotlin
+fun StringBuilder.build(block: StringBuilder.() -> Unit): StringBuilder {
+    block()
+    return this
+}
+```
+
+通过本小节所学的泛型知识对build函数进行扩展，让它实现和apply函数完全一样的功能。
+
+使用`<T>`将build函数定义成泛型函数，再将原来所有强制指定StringBuilder的地方都替换成T就可以了。
+
+新建一个build.kt文件，并编写如下代码：
+
+```kotlin
+fun <T> T.build(block: T.() -> Unit): T {
+    block()
+    return this
+}
+```
+
+现在完全可以像使用apply函数一样去使用build函数了，比如说这里我们使用
+build函数简化Cursor的遍历：
+
+```kotlin
+contentResolver.query(uri, null, null, null, null)?.build {
+    while (moveToNext()) {
+        ...
+    }
+    close()
+}
+```
 
 
 
+## 14.Kotlin委托
+
+委托是一种设计模式，它的基本理念是：**操作对象自己不会去处理某段逻辑，而是会把工作委托给另外一个辅助对象去处理。**
+
+这个概念对于Java程序员来讲可能相对比较陌生，因为Java对于委托并没有语言层级的实现，而像C#等语言就对委托进行了原生的支持。
 
 
 
+### 类委托
+
+核心思想：**将一个类的具体实现委托给另一个类去完成**。
 
 
 
+一个类可以有父类同时委托方法给其他类。当一个类同时继承自父类并委托给其他类时，该类会先调用自身的方法，如果自身没有实现，再去调用委托对象的方法，最后再去调用父类的方法。这个调用顺序被称为“覆盖顺序”。
 
 
 
+例如，假设我们有一个名为RealPrinter的类，它实现了Printer接口，我们可以将其定义为：
+
+```kotlin
+class RealPrinter(val message: String) : Printer {
+    override fun print() {
+        println(message)
+    }
+}
+```
+
+现在我们有一个需要打印消息的类，我们可以通过类委托的方式将打印操作委托给RealPrinter：
+
+```kotlin
+class MessagePrinter(val message: String) : Printer by RealPrinter(message)
+```
+
+在这个例子中，MessagePrinter将自己的打印职责委托给了RealPrinter，这样在调用MessagePrinter实例的print()方法时，实际上是委托给了RealPrinter来完成打印操作。
+
+需要注意的是，委托对象必须实现委托接口，并且委托对象中实现的方法会覆盖委托类中相同的方法。同时，委托对象中未实现的方法仍然会被委托类中的实现所覆盖。
+
+例如，Set这种数据结构，它和List有点类似，只是它所存储的数据是无序
+的，并且不能存储重复的数据。Set是一个接口，如果要使用它的话，需要使用它具体的实现类，比如HashSet。
+
+而借助于委托模式，我们可以轻松实现一个自己的实现类。比如这里定义一个MySet，并让它实现Set接口，代码如下所示：
+
+```kotlin
+class MySet<T>(val helperSet: HashSet<T>) : Set<T> {
+    override val size: Int
+        get() = helperSet.size
+    override fun contains(element: T) = helperSet.contains(element)
+    override fun containsAll(elements: Collection<T>) = helperSet.containsAll(elements)
+    override fun isEmpty() = helperSet.isEmpty()
+    override fun iterator() = helperSet.iterator()
+}
+```
+
+可以看到，MySet的构造函数中接收了一个HashSet参数，这就相当于一个辅助对象。然后在Set接口所有的方法实现中，我们都没有进行自己的实现，而是调用了辅助对象中相应的方法实现，这其实就是一种委托模式。
+
+那么，这种写法的好处是什么呢？既然都是调用辅助对象的方法实现，那还不如直接使用辅助对象得了。
+
+这么说确实没错，但如果我们只是让大部分的方法实现调用辅助对象中的方法，少部分的方法实现由自己来重写，甚至加入一些自己独有的方法，那么MySet就会成为一个全新的数据结构类，这就是委托模式的意义所在。
+
+**弊端**：
+
+如果接口中的待实现方法比较少还好，要是有几十甚至上百个方法的话，每个都去这样调用辅助对象中的相应方法实现，那要写哭了。
+
+那么这个问题有没有什么解决方案呢？在Java中确实没有，但是在Kotlin中可以通过类委托的功能来解决。
+
+Kotlin中委托使用的关键字是by，我们只需要在接口声明的后面使用by关键字，再接上受委托的辅助对象，就可以免去之前所写的一大堆模板式的代码了，如下所示：
+
+```kotlin
+class MySet<T>(val helperSet: HashSet<T>) : Set<T> by helperSet {
+}
+```
+
+这两段代码实现的效果是一模一样的，但是借助了类委托的功能之后，代码明显简化了太多。
+
+另外，如果我们要对某个方法进行重新实现，只需要单独重写那一个方法就可以了，其他的方法仍然可以享受类委托所带来的便利，如下所示：
+
+```kotlin
+class MySet<T>(val helperSet: HashSet<T>) : Set<T> by helperSet {
+    fun helloWorld() = println("Hello World")
+    override fun isEmpty() = false
+}
+```
+
+这里我们新增了一个helloWorld()方法，并且重写了isEmpty()方法，让它永远返回false。
+
+### 委托属性
+
+在 Kotlin 中，委托属性是一种将属性的 getter/setter 方法委托给另一个对象实现的机制。通过委托属性，我们可以让一个类中的属性的 get/set 方法调用另一个类的 get/set 方法，从而实现属性的重用和简化。
+
+委托属性的基本语法是：`val/var <property-name>: <Type> by <expression>`。其中，`<expression>` 是一个对象表达式或对象引用，这个对象实现了 `ReadOnlyProperty` 或 `ReadWriteProperty` 接口。
+
+举个例子，如果我们有一个 `User` 类，其中有一个 `name` 属性，我们可以使用委托属性的方式将其委托给另一个对象实现。代码如下：
+
+```kotlin
+class User {
+    var name: String by NameDelegate()
+}
+
+class NameDelegate {
+    operator fun getValue(thisRef: Any?, property: KProperty<*>): String {
+        return "John Doe"
+    }
+
+    operator fun setValue(thisRef: Any?, property: KProperty<*>, value: String) {
+        println("$value has been set to ${property.name}")
+    }
+}
+```
+
+在上面的代码中，`User` 类中的 `name` 属性被委托给了 `NameDelegate` 类来实现。`NameDelegate` 实现了 `ReadWriteProperty<Any?, String>` 接口，它包含了 `getValue()` 和 `setValue()` 方法。`getValue()` 方法返回一个字符串 "John Doe"，`setValue()` 方法打印出设置的值和属性名。
+
+当我们使用委托属性时，Kotlin 会自动调用委托对象的 `getValue()` 和 `setValue()` 方法。例如，下面的代码展示了如何使用 `User` 类中的 `name` 属性：
+
+```kotlin
+val user = User()
+println(user.name) // 输出：John Doe
+user.name = "Tom" // 输出：Tom has been set to name
+```
+
+通过委托属性，我们可以将属性的实现从类中抽离出来，使得代码更加简洁和可读。
 
 
 
+## 15.使用infix函数
+
+to并不是Kotlin语言中的一个关键字，之所以我们能够使用A to B这样的语法结构，是因为Kotlin提供了一种高级语法糖特性：infix函数。
+
+String类中有一个startsWith()函数，你一定使用过，它可以用于判断一个字符串是否是以某个指定参数开头的。比如说下面这段代码的判断结果一定会是true：
+
+```kotlin
+if ("Hello Kotlin".startsWith("Hello")) {
+	// 处理具体的逻辑
+}
+```
+
+startsWith()函数的用法虽然非常简单，但是借助infix函数，我们可以使用一种更具可读性的语法来表达这段代码。新建一个infix.kt文件，然后编写如下代码：
+
+```kotlin
+infix fun String.beginsWith(prefix: String) = startsWith(prefix)
+```
+
+首先，除去最前面的infix关键字不谈，这是一个String类的扩展函数。我们给String类添加了一个beginsWith()函数，它也是用于判断一个字符串是否是以某个指定参数开头的，并且它的内部实现就是调用的String类的startsWith()函数。
+
+但是加上了infix关键字之后，beginsWith()函数就变成了一个infix函数，这样除了传统的函数调用方式之外，我们还可以用一种特殊的语法糖格式调用beginsWith()函数，如下所示：
+
+```kotlin
+if ("Hello Kotlin" beginsWith "Hello") {
+	// 处理具体的逻辑
+}
+```
+
+从这个例子就能看出，infix函数的语法规则并不复杂，上述代码其实就是调用的" Hello Kotlin "这个字符串的beginsWith()函数，并传入了一个"Hello"字符串作为参数。但是infix函数允许我们将函数调用时的小数点、括号等计算机相关的语法去掉，从而使用一种更接近英语的语法来编写程序，让代码看起来更加具有可读性。
 
 
 
+infix函数由于其语法糖格式的特殊性，有两个比较严格的限制：
+
+1. infix函数是不能定义成顶层函数的，它必须是某个类的成员函数，可以使用扩展函数的方式将它定义到某个类当中。
+2. infix函数必须接收且只能接收一个参数，至于参数类型是没有限制的。
+
+接下来一个复杂一些的例子。
+
+比如这里有一个集合，如果想要判断集合中是否包括某个指定元素，一般可以这样写：
+
+```kotlin
+val list = listOf("Apple", "Banana", "Orange", "Pear", "Grape")
+if (list.contains("Banana")) {
+	// 处理具体的逻辑
+}
+```
+
+借助infix函数让这段代码变得更加具有可读性。在infix.kt文件中添加如下代码：
+
+```kotlin
+infix fun <T> Collection<T>.has(element: T) = contains(element)
+```
+
+可以看到，我们给Collection接口添加了一个扩展函数，这是因为Collection是Java以及Kotlin所有集合的总接口，因此给Collection添加一个has()函数，那么所有集合的子类就都可以使用这个函数了。
+
+另外，这里还使用了泛型函数的定义方法，从而使得has()函数可以接收任意具体类型的参数。
+
+而这个函数内部的实现逻辑就相当简单了，只是调用了Collection接口中
+的contains()函数而已。也就是说，has()函数和contains()函数的功能实际上是一模一样的，只是它多了一个infix关键字，从而拥有了infix函数的语法糖功能。
+现在我们就可以使用如下的语法来判断集合中是否包括某个指定的元素：
+
+```kotlin
+val list = listOf("Apple", "Banana", "Orange", "Pear", "Grape")
+if (list has "Banana") {
+	// 处理具体的逻辑
+}
+```
 
 
 
+mapOf()函数中to的具体实现：
 
+```kotlin
+public infix fun <A, B> A.to(that: B): Pair<A, B> = Pair(this, that)
+```
 
+to()函数的具体实现，非常简单，就是创建并返回了一个Pair对象。也就是说，A toB这样的语法结构实际上得到的是一个包含A、B数据的Pair对象，而mapOf()函数实际上接收的正是一个Pair类型的可变参数列表。
 
-
-
-
-
-
-
-
-
-
-
-
-
+## 16.泛型的高级特性
 
