@@ -882,7 +882,27 @@ class Student(val sno: String = "", val grade: Int = 0, name: String = "", age: 
 
 在给主构造函数的每个参数都设定了默认值之后，我们就可以使用任何传参组合的方式来对Student类进行实例化，当然也包含了刚才两种次构造函数的使用场景。
 
+### 3.使用Intent传递对象
 
+#### 1.Serializable方式
+
+```kotlin
+class Person : Serializable {
+	var name = ""
+	var age = 0
+}
+```
+
+实现接口即可,同Java。
+
+### 2.Parcelable方式
+
+```kotlin
+@Parcelize
+class Person(var name: String, var age: Int) : Parcelable
+```
+
+Kotlin给我们提供了更加简便的用法，但**前提是要传递的所有数据都必须封装在对象的主构造函数中**才行。
 
 ## 6.标准函数和静态方法
 
@@ -2857,17 +2877,205 @@ suspend fun getAppData() {
 }
 ```
 
+没有了冗长的匿名类实现，只需要简单调用一下await()函数就可以让Retrofit发起网络请求，并直接获得服务器响应的数据。
 
+## 18.编写Kotlin工具方法
 
+养成对Kotlin的各种特性进行灵活运用的意识，学会对几个常用API的用法进行简化，从而编写出一些好用的工具方法。
 
+### 1.求N个数的最大最小值
 
+两个数比大小这个功能，除了使用最基本的if语句之外，还可以借助Kotlin内置的max()函数，如下所示：
 
+```kotlin
+val a = 10
+val b = 15
+val larger = max(a, b)
+```
 
+>   可是现在如果我们想要在3个数中获取最大的那个数，应该怎么写呢？
 
+由于max()函数只能接收两个参数，因此需要先比较前两个数的大小，然后再拿较大的那个数和剩余的数进行比较，写法如下：
+```kotlin
+val a = 10
+val b = 15
+val c = 5
+val largest = max(max(a, b), c)
+```
 
+我们是可以对max()函数的用法进行简化的。
 
+vararg关键字，它允许方法接收任意多个同等类型的参数。
 
+那么我们就可以新建一个Max.kt文件，并在其中自定义一个max()函数，如下所示：
 
+```kotlin
+fun max(vararg nums: Int): Int {
+    var maxNum = Int.MIN_VALUE
+    for (num in nums) {	//nums 是一个 Int 类型的可变数组
+        maxNum = kotlin.math.max(maxNum, num)
+    }
+    return maxNum
+}
+```
 
+这里max()函数的参数声明中使用了vararg关键字，也就是说现在它可以接收任意多个整型参数。接着我们使用了一个maxNum变量来记录所有数的最大值，并在一开始将它赋值成了整型范围的最小值。然后使用for-in循环遍历nums参数列表，如果发现当前遍历的数字比maxNum更大，就将maxNum的值更新成这个数，最终将maxNum返回即可。
 
+现在就可以使用如下的写法来实现：
 
+```kotlin
+val a = 10
+val b = 15
+val c = 5
+val largest = max(a, b, c)
+```
+
+>   如果还想求N个浮点型或长整型数字的最大值，该怎么办呢？
+
+可以定义很多个max()函数的重载，来接收不同类型的参数，Kotlin中内置的max()函数也是这么做的。
+
+Java中规定，所有类型的数字都是可比较的，因此必须实现Comparable接口，这个规则在Kotlin中也同样成立。那么我们就可以借助泛型，将max()函数修改成接收任意多个实现Comparable接口的参数，代码如下所示：
+
+```kotlin
+fun <T : Comparable<T>> max(vararg nums: T): T {
+    if (nums.isEmpty()) throw RuntimeException("Params can not be empty.")
+    var maxNum = nums[0]
+    for (num in nums) {
+        if (num > maxNum) {
+            maxNum = num
+        }
+    }
+    return maxNum
+}
+```
+
+这段代码中传入的泛型T必须是实现了Comparable接口的泛型，因为在该函数内部需要对泛型T进行比较操作，而Comparable接口是实现了Java中的对象比较机制。
+
+接下来，我们判断nums参数列表是否为空，如果为空的话就主动抛出一个异常，提醒调用者max()函数必须传入参数。紧接着将maxNum的值赋值成nums参数列表中第一个参数的值，然后同样是遍历参数列表，如果发现了更大的值就对maxNum进行更新。
+
+```kotlin
+val a = 3.5
+val b = 3.8
+val c = 4.1
+val largest = max(a, b, c)
+```
+
+### 2.简化Toast的用法
+
+```kotlin
+Toast.makeText(context, "This is Toast", Toast.LENGTH_SHORT).show()
+```
+
+很多人因为忘记调用最后的show()方法，导致Toast无法弹出，从而产生bug。
+
+分析一下，Toast的makeText()方法接收3个参数：
+
+-   第一个参数是Toast显示的上下文环境，必不可少；
+-   第二个参数是Toast显示的内容，需要由调用方进行指定，可以传入字符串和字符串资源id两种类型；
+-   第三个参数是Toast显示的时长，只支持Toast.LENGTH_SHORT和Toast.LENGTH_LONG这两种值，相对来说变化不大。
+
+给String类和Int类各添加一个扩展函数，并在里面封装弹出Toast的具体逻辑。这样以后每次想要弹出Toast提示时，只需要调用它们的扩展函数就可以了。
+新建一个Toast.kt文件，并在其中编写如下代码：
+
+```kotlin
+fun String.showToast(context: Context) {
+    Toast.makeText(context, this, Toast.LENGTH_SHORT).show()
+}
+fun Int.showToast(context: Context) {
+    Toast.makeText(context, this, Toast.LENGTH_SHORT).show()
+}
+```
+
+现在：
+
+```kotlin
+"This is Toast".showToast(context)
+```
+
+### 3.简化Snackbar的用法
+
+```kotlin
+Snackbar.make(view, "This is Snackbar", 			Snackbar.LENGTH_SHORT)
+	.setAction("Action") {
+		// 处理具体的逻辑
+	}
+	.show()
+```
+
+可以看到，Snackbar中make()方法的第一个参数变成了View，而Toast中makeText()方法的第一个参数是Context，另外Snackbar还可以调用setAction()方法来设置一个额外的点击事件。除了这些区别之外，Snackbar和Toast的其他用法都是相似的。
+
+由于make()方法接收一个View参数，Snackbar会使用这个View自动查找最外层的布局，用于展示Snackbar。因此，我们就可以给View类添加一个扩展函数，并在里面封装显示Snackbar的具体逻辑。新建一个Snackbar.kt文件，并编写如下代码：
+
+```kotlin
+fun View.showSnackbar(text: String, duration: Int = Snackbar.LENGTH_SHORT) {
+    Snackbar.make(this, text, duration).show()
+}
+fun View.showSnackbar(resId: Int, duration: Int = Snackbar.LENGTH_SHORT) {
+    Snackbar.make(this, resId, duration).show()
+}
+```
+
+这段代码应该还是很好理解的，和刚才的showToast()函数比较相似。只是我们将扩展函数添加到了View类当中，并在参数列表上声明了Snackbar要显示的内容以及显示的时长。另外，Snackbar和Toast类似，显示的内容也是支持传入字符串和字符串资源id两种类型的，因此这里我们给showSnackbar()函数进行了两种参数类型的函数重载。
+
+现在：
+
+```kotlin
+view.showSnackbar("This is Snackbar")
+```
+
+使用高阶函数让showSnackbar()函数再额外接收一个函数类型参数，以此来实现Snackbar的完整功能支持。
+
+修改Snackbar.kt中的代码，如下所示：
+
+```kotlin
+fun View.showSnackbar(text: String, actionText: String? = null,
+                      duration: Int = Snackbar.LENGTH_SHORT, block: (() -> Unit)? = null) {
+    val snackbar = Snackbar.make(this, text, duration)
+    if (actionText != null && block != null) {
+        snackbar.setAction(actionText) {
+            block()
+        }
+    }
+    snackbar.show()
+}
+fun View.showSnackbar(resId: Int, actionResId: Int? = null,
+                      duration: Int = Snackbar.LENGTH_SHORT, block: (() -> Unit)? = null) {
+    val snackbar = Snackbar.make(this, resId, duration)
+    if (actionResId != null && block != null) {
+        snackbar.setAction(actionResId) {
+            block()
+        }
+    }
+    snackbar.show()
+}
+```
+
+这里给两个`showSnackbar()`函数都增加了一个函数类型参数，并且还增加了一个用于传递给setAction()方法的字符串或字符串资源id。这里我们需要将新增的两个参数都设置成可为空的类型，并将默认值都设置成空，然后只有当两个参数都不为空的时候，我们才去调用Snackbar的setAction()方法来设置额外的点击事件。如果触发了点击事件，只需要调用函数类型参数将事件传递给外部的Lambda表达式即可。
+
+现在：
+
+```kotlin
+view.showSnackbar("This is Snackbar", "Action") {
+	// 处理具体的逻辑
+}
+```
+
+## 19.Java与Kotlin代码之间的转换
+
+### 1.自动转换
+
+copy
+
+![image-20230410111046691](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230410111046691.png)
+
+上述方法是将一段Java代码转换成Kotlin代码的方式。另外，还可以直接将一个Java文件以及其中的所有代码一次性转换成Kotlin版本。具体操作方法是，首先在Android Studio中打开该Java文件，然后点击导航栏中的Code→Convert Java File to Kotlin File，如图所示。
+
+![image-20230410111154216](https://cdn.jsdelivr.net/gh/ChengYang1998/blogImage@main/PicGo/image-20230410111154216.png)
+
+>   Kotlin代码又该如何转换成Java代码呢？
+
+很遗憾的是，Android Studio并没有提供类似的转换功能。
+
+因为Kotlin拥有许多Java中并不存在的特性，因此很难执行这样的一键转换。
+
+不过，我们却可以先将Kotlin代码转换成Kotlin字节码，然后再通过反编译的方式将它还原成Java代码。这种反编译出来的代码可能无法像正常编写的Java代码那样直接运行，但是非常有利于帮助我们理解诸多Kotlin特性背后的实现原理。
